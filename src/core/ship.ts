@@ -56,8 +56,9 @@ const DRAG_PER_FRAME = 255 / 256
  * when bit 7 is set. Y-thrust reads sinLookup(dir); X-thrust reads
  * sinLookup(dir + 64) — the ROM's cosine-by-phase-shift (CalcXThrust $77d2
  * adds #$40). Bitwise ops truncate fractional dt-scaled directions the same
- * way the ROM's byte math would. */
-function sinLookup(d: number): number {
+ * way the ROM's byte math would. Exported so firing (bullet.ts) resolves a
+ * shot's heading through the same ROM routine, not a private copy. */
+export function sinLookup(d: number): number {
   const b = d & 255
   const i = b & 127
   const mag = SHIP_THRUST_TABLE[i <= 64 ? i : 128 - i]

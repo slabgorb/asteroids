@@ -38,9 +38,13 @@ export interface Rock {
   size: RockSize
 }
 
-/** A player (or saucer) shot in flight. */
+/** A player (or saucer) shot in flight (A-4). `vel` is world-units per 60 Hz
+ * frame (the ship's velocity plus the muzzle velocity — momentum is inherited);
+ * `life` is the remaining lifetime in frames, counting down to removal. */
 export interface Bullet {
   pos: Vec2
+  vel: Vec2
+  life: number
 }
 
 /** The flying-saucer enemy. */
@@ -64,6 +68,10 @@ export interface GameState {
   rocks: Rock[]
   bullets: Bullet[]
   saucer: Saucer | null
+  /** Previous frame's fire-button state — the shift-register debounce that makes
+   * firing edge-triggered (A-4, ShipBulletSR $63): a shot spawns only on a fresh
+   * low→high press, so holding fire does not auto-fire. */
+  firePrev: boolean
 }
 
 const DEFAULT_SEED = 1979
@@ -86,5 +94,7 @@ export function initialState(seed: number = DEFAULT_SEED): GameState {
     rocks: [],
     bullets: [],
     saucer: null,
+    // Fire not held at boot, so the very first press reads as a rising edge.
+    firePrev: false,
   }
 }
