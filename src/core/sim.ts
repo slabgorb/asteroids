@@ -13,6 +13,7 @@ import type { Rng } from './rng'
 import { stepShip, SHIP_HITBOX } from './ship'
 import { stepBullets } from './bullet'
 import { updateRocks, splitRock, ROCK_HITBOX } from './rocks'
+import { applyScore } from './score'
 import { wrappedDelta, type Bounds } from './bounds'
 
 const WORLD_BOUNDS: Bounds = { width: WORLD_W, height: WORLD_H }
@@ -41,6 +42,8 @@ export function stepGame(state: GameState, input: Input, dt: number): GameState 
     state.mode === 'playing' ? updateRocks(state.rocks, dt, WORLD_BOUNDS) : state.rocks
   let liveBullets: Bullet[] = bullets
   let shipDestroyed = state.shipDestroyed
+  let score = state.score
+  let lives = state.lives
 
   // Collision + destruction runs on the post-move positions, during play only.
   if (state.mode === 'playing') {
@@ -53,8 +56,20 @@ export function stepGame(state: GameState, input: Input, dt: number): GameState 
     const survivors: Bullet[] = []
     for (const bullet of liveBullets) {
       const hit = working.findIndex((r) => overlaps(bullet.pos, r.pos, ROCK_HITBOX[r.size]))
-      if (hit === -1) survivors.push(bullet)
-      else working.splice(hit, 1, ...splitRock(working[hit], rng))
+      if (hit === -1) {
+        survivors.push(bullet)
+      } else {
+        // A-9: score the destroyed rock's OWN tier (children are scored only
+        // when they are later shot), then split it. applyScore also grants a
+        // bonus ship for every 10000-point boundary this award crosses. A child
+        // spawned this frame that a later bullet hits is a real, separate
+        // destruction and scores its own tier — no rock is ever counted twice.
+        const destroyed = working[hit]
+        const awarded = applyScore(score, lives, destroyed.size)
+        score = awarded.score
+        lives = awarded.lives
+        working.splice(hit, 1, ...splitRock(destroyed, rng))
+      }
     }
     rocks = working
     liveBullets = survivors
@@ -74,6 +89,8 @@ export function stepGame(state: GameState, input: Input, dt: number): GameState 
     ship,
     rocks,
     bullets: liveBullets,
+    score,
+    lives,
     firePrev,
     shipDestroyed,
   }
