@@ -36,9 +36,11 @@ import {
   WORLD_H,
   type GameState,
   type Saucer,
+  type Bullet,
 } from '../src/core/state'
 import {
   updateSpawnDirector,
+  stepSaucer,
   SAUCER_SPEED,
   SAUCER_SPAWN_TIMER_INITIAL,
   SAUCER_SPAWN_TIMER_FLOOR,
@@ -189,6 +191,19 @@ describe('updateSpawnDirector — spawn cadence & single-saucer invariant (AC)',
     }
     expect(spawned).toBe(true)
   })
+
+  it('arms a reload that shrinks with the wave and clamps at the floor (spawnReload)', () => {
+    // The armed `saucerSpawnTimer` after one director tick on a not-counting field IS
+    // `spawnReload(wave)`. Exercising it at several waves pins the difficulty shrink +
+    // floor clamp — replacing the shrink with a constant reload would fail here.
+    const armAt = (wave: number): number =>
+      updateSpawnDirector({ ...playing(1), wave, saucer: null, saucerSpawnTimer: 0 }, DT).saucerSpawnTimer
+
+    expect(armAt(1)).toBe(SAUCER_SPAWN_TIMER_INITIAL) // early game: no shrink yet
+    expect(armAt(10)).toBeLessThan(armAt(1)) // shrinks as difficulty rises
+    expect(armAt(10)).toBeGreaterThanOrEqual(SAUCER_SPAWN_TIMER_FLOOR)
+    expect(armAt(100000)).toBe(SAUCER_SPAWN_TIMER_FLOOR) // clamps at the floor, never below
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -260,6 +275,33 @@ describe('large saucer — crosses the field and despawns on the far edge, never
       expect(Math.abs(step)).toBeLessThan(WORLD_W / 2) // never a wrap-sized jump
     }
   })
+
+  it('despawns a LEFT-entering saucer on the far RIGHT edge too (the x > WORLD_W branch)', () => {
+    // Every seed-driven test above uses seed 1979, which enters from the RIGHT and
+    // only exercises the `x < 0` despawn half. Force a LEFT entry (x=0, moving right)
+    // so the mirror `x > WORLD_W` branch is exercised — deleting it would let this
+    // saucer drift off-screen forever (never despawning, permanently gating the wave
+    // director), which this test catches.
+    const base = requireSaucer(spawnLiveSaucer(1979))
+    const start: GameState = {
+      ...playing(1979),
+      saucer: { ...base, pos: { x: 0, y: base.pos.y }, velocity: { x: SAUCER_SPEED, y: base.velocity.y } },
+    }
+    let s = start
+    let lastAliveX = -1
+    let despawned = false
+    for (let i = 0; i < Math.ceil(WORLD_W / SAUCER_SPEED) + 200; i++) {
+      const before = s.saucer
+      s = stepGame(s, NO_INPUT, DT)
+      if (s.saucer === null) {
+        if (before !== null) lastAliveX = before.pos.x
+        despawned = true
+        break
+      }
+    }
+    expect(despawned).toBe(true) // it DID despawn (the x > WORLD_W branch fired)
+    expect(lastAliveX).toBeGreaterThan(WORLD_W / 2) // it exited via the far RIGHT edge, not the left
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -270,6 +312,7 @@ describe('large saucer — zigzag vertical course changes (AC)', () => {
   it('changes vertical velocity only on the course cadence, always drawing from the table', () => {
     const period = Math.round(SAUCER_COURSE_CHANGE_INTERVAL / DT)
     const seenVy = new Set<number>()
+    let gapsChecked = 0
 
     for (const seed of [1979, 2024, 4242, 777, 31337, 90210]) {
       const start = spawnLiveSaucer(seed)
@@ -285,19 +328,27 @@ describe('large saucer — zigzag vertical course changes (AC)', () => {
         expect(SAUCER_VERTICAL_SPEEDS.includes(vy), `vy ${vy} (seed ${seed}) off the table`).toBe(true)
         seenVy.add(vy)
       }
-      // Every CHANGE lands on a course-cadence boundary (±1 frame for dt-quantised
-      // countdown). Same-value rerolls are invisible here — that's fine; the AC is
-      // "changes ONLY at the cadence", not "changes every cadence".
+      // The gap between consecutive VISIBLE changes must be an EXACT multiple of the
+      // course period — pinned with zero tolerance. A 1-frame-per-cycle drift (e.g.
+      // resetting the timer to the interval instead of carrying its remainder) yields
+      // a gap of period+1, which fails `% period`. Same-value rerolls are invisible,
+      // which only stretches a gap to 2×/3× the period — still an exact multiple.
+      const changeIdx: number[] = []
       for (let i = 1; i < vys.length; i++) {
-        if (vys[i] !== vys[i - 1]) {
-          const phase = i % period
-          expect(Math.min(phase, period - phase), `change at tick ${i} (seed ${seed})`).toBeLessThanOrEqual(1)
-        }
+        if (vys[i] !== vys[i - 1]) changeIdx.push(i)
+      }
+      for (let k = 1; k < changeIdx.length; k++) {
+        const gap = changeIdx[k] - changeIdx[k - 1]
+        expect(gap % period, `change gap ${gap} (seed ${seed}) is not a multiple of the ${period}-frame cadence`).toBe(0)
+        gapsChecked++
       }
     }
     // Across seeds the saucer really weaved: at least two distinct vertical speeds
     // were drawn (a broken reroll that always picked one value would fail here).
     expect(seenVy.size).toBeGreaterThanOrEqual(2)
+    // And we actually exercised the cadence: at least one inter-change gap was checked
+    // (otherwise the `% period` assertion above would be vacuously skipped).
+    expect(gapsChecked).toBeGreaterThan(0)
   })
 })
 
@@ -311,22 +362,27 @@ describe('large saucer — random fire cadence & headings (AC)', () => {
     requireSaucer(start)
     const period = Math.round(SAUCER_FIRE_INTERVAL / DT)
 
-    // No player input → every bullet in state.bullets is the saucer's.
+    // No player input → every bullet in state.bullets is the saucer's. Detect each
+    // shot as a tick where the saucer-bullet count RISES (fires land on a different
+    // frame parity than expiries, so a rise is always a fresh shot).
     const counts: number[] = []
     let s = start
-    for (let i = 0; i < period * 4 + 5; i++) {
+    for (let i = 0; i < period * 6 + 5; i++) {
       s = stepGame(s, NO_INPUT, DT)
       counts.push(s.bullets.length)
     }
+    const fireTicks: number[] = [] // 1-indexed stepGame tick of each new shot
+    for (let i = 0; i < counts.length; i++) {
+      const prev = i === 0 ? 0 : counts[i - 1]
+      if (counts[i] > prev) fireTicks.push(i + 1)
+    }
 
-    const firstFire = counts.findIndex((c) => c >= 1)
-    expect(firstFire).toBeGreaterThanOrEqual(0) // it fired (non-vacuous)
-    expect(Math.abs(firstFire + 1 - period)).toBeLessThanOrEqual(1) // ~one interval in
-
-    if (SAUCER_MAX_BULLETS >= 2) {
-      const secondFire = counts.findIndex((c, i) => i > firstFire && c >= 2)
-      expect(secondFire).toBeGreaterThan(firstFire)
-      expect(Math.abs(secondFire - firstFire - period)).toBeLessThanOrEqual(1) // keeps the cadence
+    expect(fireTicks.length).toBeGreaterThanOrEqual(2) // fired repeatedly (non-vacuous)
+    expect(fireTicks[0]).toBeGreaterThan(1) // first shot is NOT immediate — it waits a full interval
+    // Consecutive shots are spaced by EXACTLY the fire period — zero tolerance, so a
+    // drifting or wrong-magnitude cadence fails here rather than hiding in a ±1 band.
+    for (let k = 1; k < fireTicks.length; k++) {
+      expect(fireTicks[k] - fireTicks[k - 1], 'fire cadence must be exactly the fire interval').toBe(period)
     }
   })
 
@@ -376,6 +432,37 @@ describe('large saucer bullets — cap, lifetime & owner discriminant (AC)', () 
       if (saucerShots.length > 0) sawShot = true
     }
     expect(sawShot).toBe(true) // the cap was actually exercised, not vacuously satisfied
+  })
+
+  it('suppresses fire at the cap and allows it one below — cap is the binding constraint', () => {
+    // The integration test above cannot fail even if the cap check is deleted (with
+    // lifetime 18 / cadence ~10, natural concurrency never exceeds 2 anyway). This
+    // drives `stepSaucer` directly with a state ALREADY holding N live saucer shots
+    // and a saucer whose fireTimer is due, so the cap check IS the only thing that can
+    // stop a new shot — deleting it makes the at-cap case overflow to MAX+1 and fail.
+    const base = requireSaucer(spawnLiveSaucer(1979))
+    const saucerShot = (): Bullet => ({
+      pos: { x: 10, y: 10 },
+      vel: { x: SAUCER_BULLET_SPEED, y: 0 },
+      life: SAUCER_BULLET_LIFETIME,
+      owner: 'saucer',
+    })
+    const stepWith = (n: number): GameState =>
+      stepSaucer(
+        {
+          ...playing(1979),
+          saucer: { ...base, fireTimer: 0 }, // fireTimer 0 → this tick is a fire tick
+          bullets: Array.from({ length: n }, saucerShot),
+        },
+        DT,
+      )
+
+    // At the cap: the due shot is SUPPRESSED — count stays at MAX (would be MAX+1 uncapped).
+    const atCap = stepWith(SAUCER_MAX_BULLETS)
+    expect(atCap.bullets.filter((b) => b.owner === 'saucer').length).toBe(SAUCER_MAX_BULLETS)
+    // One below the cap: the due shot FIRES — count rises to MAX.
+    const belowCap = stepWith(SAUCER_MAX_BULLETS - 1)
+    expect(belowCap.bullets.filter((b) => b.owner === 'saucer').length).toBe(SAUCER_MAX_BULLETS)
   })
 
   it('removes each saucer bullet after its lifetime — bounded life, never immortal', () => {
