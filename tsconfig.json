@@ -9,8 +9,8 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
-    "types": ["vitest/globals", "vite/client"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["vitest/globals", "vite/client", "node"],
     "noEmit": true
   },
   "include": ["src", "tests"]

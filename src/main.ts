@@ -1,14 +1,20 @@
 // src/main.ts
 //
-// Wave-0 scaffold bootstrap (story A-1). Own the canvas, size it to the window,
-// fill it black, and stroke one placeholder vector shape — a small ship triangle
-// — so hitting http://localhost:5275/asteroids/ shows a glowing outline instead
-// of a blank tab. No input loop, no game state, no simulation: those arrive in
-// A-2, split across the pure core/ (sim/state/rng) and the shell/ (render/io)
-// per the epic's hard core/shell boundary.
+// Bootstrap: owns the canvas and wires the shell's fixed-timestep loop to the
+// pure core. `step` advances `GameState` through `stepGame`; `render` is a
+// stub for this story (A-5 does real rendering) — it just re-draws the A-1
+// placeholder ship triangle so the tab isn't blank. No input capture yet
+// (NO_INPUT stands in); that arrives with A-3+.
+
+import { createLoop } from './shell/loop'
+import { initialState } from './core/state'
+import { stepGame } from './core/sim'
+import { NO_INPUT } from './core/input'
 
 const canvas = document.getElementById('game') as HTMLCanvasElement
 const ctx = canvas.getContext('2d')!
+
+let state = initialState()
 
 function draw(): void {
   const dpr = Math.min(2, window.devicePixelRatio || 1)
@@ -47,3 +53,13 @@ function draw(): void {
 
 window.addEventListener('resize', draw)
 draw()
+
+const loop = createLoop(
+  (dt) => {
+    state = stepGame(state, NO_INPUT, dt)
+  },
+  () => {
+    draw()
+  },
+)
+loop.start()
