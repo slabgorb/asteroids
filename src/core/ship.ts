@@ -20,6 +20,7 @@
 import type { Ship } from './state'
 import { WORLD_W, WORLD_H } from './state'
 import type { Input } from './input'
+import { wrapPosition, type Bounds } from './bounds'
 
 /** Direction-units added per 60 Hz frame while a rotate button is held
  * (ChkPlyrInput $708b: `lda #$03`; $7094: `lda #$fd`). 256 units = full
@@ -69,12 +70,9 @@ function clampAxis(v: number): number {
   return Math.min(SHIP_MAX_SPEED, Math.max(-SHIP_MAX_SPEED, v))
 }
 
-/** Toroidal wrap into [0, size) — sim-level, both axes (UpdateObjPos $6fc7:
- * X masks hi mod $20, Y snaps at $18; both reduce to exact mod at all
- * reachable speeds). */
-function wrap(v: number, size: number): number {
-  return ((v % size) + size) % size
-}
+// Toroidal screen wrap (UpdateObjPos $6fc7) lives in the shared ./bounds
+// module since A-6, so ship and rocks fold identically by construction.
+const WORLD_BOUNDS: Bounds = { width: WORLD_W, height: WORLD_H }
 
 /** Advance the ship one step. `dt` is seconds; rates are ROM-per-frame, so
  * they scale by dt*60 (the fixed-timestep loop feeds exactly 1/60). */
@@ -88,7 +86,9 @@ export function stepShip(ship: Ship, input: Input, dt: number): Ship {
   let dir = ship.dir
   if (input.left) dir += SHIP_ROTATION_RATE * frames
   else if (input.right) dir -= SHIP_ROTATION_RATE * frames
-  dir = wrap(dir, 256)
+  // Fold onto the 256-unit circle (a heading, not a position — the shared
+  // wrapPosition handles the playfield; this stays a plain mod).
+  dir = ((dir % 256) + 256) % 256
 
   let vx = ship.vel.x
   let vy = ship.vel.y
@@ -108,10 +108,10 @@ export function stepShip(ship: Ship, input: Input, dt: number): Ship {
   vy = clampAxis(vy)
 
   return {
-    pos: {
-      x: wrap(ship.pos.x + vx * frames, WORLD_W),
-      y: wrap(ship.pos.y + vy * frames, WORLD_H),
-    },
+    pos: wrapPosition(
+      { x: ship.pos.x + vx * frames, y: ship.pos.y + vy * frames },
+      WORLD_BOUNDS,
+    ),
     vel: { x: vx, y: vy },
     dir,
   }
