@@ -295,3 +295,92 @@ describe('stepGame — positions stay wrapped onto the toroidal field (AC-5, reg
     expect(s1.bullets[0].pos.y).toBeCloseTo(5, 6) // (WORLD_H-5)+10 → wraps to 5
   })
 })
+
+describe('collision hardening — kills A-8 mutation-weak survivors (A-9 carry-forward)', () => {
+  // A-8's suite let three mutations survive (session Delivery Findings). A-9
+  // builds scoring directly on this loop, so these guards lock the loop down
+  // first. All are GREEN against the shipped A-8 code — pure regression guards.
+  const shipAt = (pos: Vec2): GameState['ship'] => ({ pos: { ...pos }, vel: { x: 0, y: 0 }, dir: 64 })
+
+  // Mutation A — collapse `overlaps` to one axis (|dx|<extent only): every
+  // existing bullet-vs-rock test offsets along X (dy=0), so an x-only predicate
+  // survives them. A purely-Y separation beyond the hitbox MUST miss.
+  it('a bullet far in Y (dx=0) does NOT collide — overlaps checks BOTH axes', () => {
+    const above: Vec2 = { x: CENTER.x, y: CENTER.y + ROCK_HITBOX.large * 1.5 } // |dy|=198 > 132
+    const s1 = stepGame(
+      playing(4242, { rocks: [rockAt(CENTER, 'large')], bullets: [bulletAt(above)] }),
+      NO_INPUT,
+      DT,
+    )
+    expect(s1.rocks).toHaveLength(1) // survives — no 1D collapse
+    expect(s1.rocks[0].size).toBe('large')
+    expect(s1.bullets).toHaveLength(1) // bullet not consumed
+  })
+
+  it('a bullet just inside the hitbox along Y DOES collide (the Y axis is live)', () => {
+    const above: Vec2 = { x: CENTER.x, y: CENTER.y + ROCK_HITBOX.large * 0.8 } // |dy|=105.6 < 132
+    const s1 = stepGame(
+      playing(4242, { rocks: [rockAt(CENTER, 'large')], bullets: [bulletAt(above)] }),
+      NO_INPUT,
+      DT,
+    )
+    expect(s1.rocks).toHaveLength(2)
+  })
+
+  // Mutation B — hardcode the ship extent to one constant. Ship-vs-rock extent
+  // is per-tier (SHIP_HITBOX 96 + ROCK_HITBOX[size]: large 228, small 138). One
+  // gap that destroys the ship against a LARGE rock but spares it against a
+  // SMALL one proves the predicate reads the rock's tier.
+  it('ship-vs-rock extent scales per rock tier (large hits, small misses at the same gap)', () => {
+    const gap: Vec2 = { x: CENTER.x + 150, y: CENTER.y } // 150 < 228 (large) but > 138 (small)
+    const largeHit = stepGame(
+      playing(4242, { ship: shipAt(CENTER), rocks: [rockAt(gap, 'large')] }),
+      NO_INPUT,
+      DT,
+    )
+    const smallMiss = stepGame(
+      playing(4242, { ship: shipAt(CENTER), rocks: [rockAt(gap, 'small')] }),
+      NO_INPUT,
+      DT,
+    )
+    expect(largeHit.shipDestroyed).toBe(true)
+    expect(smallMiss.shipDestroyed).toBe(false)
+  })
+
+  // Mutation C — delete the `mode === 'playing'` gate. Destruction must not
+  // happen during attract or gameover.
+  it('no bullet-vs-rock destruction outside playing mode', () => {
+    for (const mode of ['attract', 'gameover'] as const) {
+      const s1 = stepGame(
+        {
+          ...initialState(4242),
+          mode,
+          rocks: [rockAt(CENTER, 'large')],
+          bullets: [bulletAt(CENTER)],
+        },
+        NO_INPUT,
+        DT,
+      )
+      expect(s1.rocks).toHaveLength(1) // not split
+      expect(s1.rocks[0].size).toBe('large')
+    }
+  })
+
+  // Survivor identity: a non-hit rock keeps its exact position, not merely the
+  // array count — an implementation that rebuilt the survivor would slip past a
+  // length-only assertion.
+  it('a surviving rock keeps its identity and position after another rock is hit', () => {
+    const survivorPos: Vec2 = { x: 6000, y: 5000 } // far from CENTER and the ship spawn
+    const s1 = stepGame(
+      playing(4242, {
+        rocks: [rockAt(CENTER, 'large'), rockAt(survivorPos, 'large')],
+        bullets: [bulletAt(CENTER)],
+      }),
+      NO_INPUT,
+      DT,
+    )
+    const survivors = s1.rocks.filter((r) => r.size === 'large')
+    expect(survivors).toHaveLength(1)
+    expect(survivors[0].pos).toEqual(survivorPos) // untouched — zero-drift, still exactly here
+  })
+})
