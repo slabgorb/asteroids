@@ -68,7 +68,7 @@ function rockAt(pos: Vec2, size: RockSize, over: Partial<Rock> = {}): Rock {
 
 /** A motionless, long-lived bullet at `pos` (only a collision should remove it). */
 function bulletAt(pos: Vec2, over: Partial<Bullet> = {}): Bullet {
-  return { pos: { ...pos }, vel: { x: 0, y: 0 }, life: 60, ...over }
+  return { pos: { ...pos }, vel: { x: 0, y: 0 }, life: 60, owner: 'player', ...over }
 }
 
 /** A `playing`-mode state (scoring only happens during play) seeded and overlaid

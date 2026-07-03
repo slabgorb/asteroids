@@ -449,7 +449,7 @@ describe('updateWaveDirector — wave transition is delayed, not instant (AC)', 
 
 describe('updateWaveDirector — waits for a live saucer to clear too (forward-compat)', () => {
   it('does NOT spawn the next wave while a saucer is alive, even past the delay', () => {
-    const saucer: Saucer = { pos: { x: 100, y: 100 } }
+    const saucer: Saucer = { pos: { x: 100, y: 100 }, velocity: { x: 0, y: 0 }, courseTimer: 0, fireTimer: 0 }
     const s0: GameState = { ...armedClear(1, 3), saucer }
     const s = runDirector(s0, TICKS_TO_ARM + 5)
     expect(s.rocks).toHaveLength(0)

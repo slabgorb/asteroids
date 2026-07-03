@@ -58,7 +58,7 @@ function rockAt(pos: Vec2, size: RockSize, over: Partial<Rock> = {}): Rock {
 /** A motionless, long-lived bullet at `pos` (life well above one frame so it
  * never self-expires mid-test — only a collision should remove it). */
 function bulletAt(pos: Vec2, over: Partial<Bullet> = {}): Bullet {
-  return { pos: { ...pos }, vel: { x: 0, y: 0 }, life: 60, ...over }
+  return { pos: { ...pos }, vel: { x: 0, y: 0 }, life: 60, owner: 'player', ...over }
 }
 
 /** A `playing`-mode state (rocks only drift/collide in 'playing') seeded and
