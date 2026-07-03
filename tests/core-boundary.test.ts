@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url'
 
 const CORE_DIR = fileURLToPath(new URL('../src/core/', import.meta.url))
 
-const EXPECTED_CORE_FILES = ['rng.ts', 'state.ts', 'input.ts', 'sim.ts']
+const EXPECTED_CORE_FILES = ['rng.ts', 'state.ts', 'input.ts', 'sim.ts', 'ship.ts']
 
 // Match banned globals as *calls* (identifier followed by `(`).
 const BANNED_GLOBALS: ReadonlyArray<readonly [string, RegExp]> = [
