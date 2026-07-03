@@ -333,20 +333,34 @@ describe('screen wrap — toroidal, in the sim (AC-4)', () => {
     expect(Math.abs(after.ship.pos.y - 6138)).toBeLessThanOrEqual(0.5)
   })
 
-  it('keeps the ship inside [0, WORLD_W) x [0, WORLD_H) across a spiralling max-speed run', () => {
+  it('keeps the ship inside [0, WORLD_W) x [0, WORLD_H) and provably wraps both axes at speed', () => {
+    // 21 frames of rotate+thrust swing the heading from 64 (up) to 127
+    // (nearly -x), then sustained straight thrust drives vx to the per-axis
+    // clamp (~64/frame): the run crosses the x seam several times and the y
+    // seam once. (A continuously-spiralling script cannot serve here: the
+    // thrust integral of a rotating heading largely cancels — measured
+    // final speed ~35.6 — and the ship may never reach a seam at all.)
     let s = playing(7)
+    let prev = s.ship.pos
+    let wrapsX = 0
+    let wrapsY = 0
     for (let i = 0; i < 600; i++) {
-      s = stepGame(s, i % 3 === 0 ? LEFT_THRUST : THRUST, DT)
+      s = stepGame(s, i < 21 ? LEFT_THRUST : THRUST, DT)
       const { x, y } = s.ship.pos
       expect(x).toBeGreaterThanOrEqual(0)
       expect(x).toBeLessThan(WORLD_W)
       expect(y).toBeGreaterThanOrEqual(0)
       expect(y).toBeLessThan(WORLD_H)
+      // A per-frame jump of more than half the world is the wrap signature
+      // (top speed per axis is ~64 units/frame, far below W/2).
+      if (Math.abs(x - prev.x) > WORLD_W / 2) wrapsX++
+      if (Math.abs(y - prev.y) > WORLD_H / 2) wrapsY++
+      prev = s.ship.pos
     }
-    // The run must actually have crossed edges, or this proved nothing:
-    // at cap speed (~64/frame) 600 frames cover >4 widths of the world.
-    const v = s.ship.vel
-    expect(Math.hypot(v.x, v.y)).toBeGreaterThan(60)
+    // Non-vacuity: the run must actually have crossed the seams, at speed.
+    expect(wrapsX).toBeGreaterThanOrEqual(2)
+    expect(wrapsY).toBeGreaterThanOrEqual(1)
+    expect(Math.hypot(s.ship.vel.x, s.ship.vel.y)).toBeGreaterThan(60)
   })
 })
 
