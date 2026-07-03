@@ -28,3 +28,20 @@ export function wrapPosition(position: Vec2, bounds: Bounds): Vec2 {
     y: wrap(position.y, bounds.height),
   }
 }
+
+/** Signed shortest per-axis displacement from `b` to `a` across the torus,
+ * folded into (-size/2, size/2] on each axis. A-8 collision measures entities
+ * with this so a pair straddling a seam reads as adjacent, not a world apart.
+ * Pure. */
+export function wrappedDelta(a: Vec2, b: Vec2, bounds: Bounds): Vec2 {
+  return {
+    x: shortest(a.x - b.x, bounds.width),
+    y: shortest(a.y - b.y, bounds.height),
+  }
+}
+
+/** Fold a raw axis difference to its shortest toroidal equivalent. */
+function shortest(d: number, size: number): number {
+  const folded = wrap(d, size)
+  return folded > size / 2 ? folded - size : folded
+}
