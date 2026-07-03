@@ -46,6 +46,24 @@ export const ROCK_SPEED_MAX: Readonly<Record<RockSize, number>> = {
   small: 32,
 }
 
+/** A-7: angular spread (radians) applied to each child's inherited heading when
+ * a rock splits. The split routine was the thinnest area in both fetches and the
+ * exact spread formula was NOT found — but the original's two children visibly
+ * diverge in direction on split, so a spread must exist. Feel-based provisional
+ * (each child veers up to ±this off the parent heading). Verify vs quarry (A-17). */
+export const SPLIT_SPREAD_ANGLE = Math.PI / 6
+
+/** A-7: per child-tier multiplier applied to the inherited parent speed before
+ * re-clamping into the child tier's band (smaller children scale up slightly —
+ * the cabinet's "smaller rocks are faster" feel). Indexed by the CHILD tier;
+ * children are only ever medium (from large) or small (from medium). Feel-based
+ * provisional, not found in the fetches — verify vs quarry (A-17). */
+export const SPLIT_SPEED_SCALE: Readonly<Record<RockSize, number>> = {
+  large: 1,
+  medium: 1.1,
+  small: 1.25,
+}
+
 /** Spawn one rock: random position inside bounds, random fixed shape variant,
  * and a drift velocity drawn as a random heading with a scalar speed in the
  * tier's band (so the speed is always within [MIN, MAX) by construction).
@@ -89,4 +107,56 @@ export function updateRock(rock: Rock, dt: number, bounds: Bounds): Rock {
 /** Advance every rock. Fresh array, inputs untouched. */
 export function updateRocks(rocks: readonly Rock[], dt: number, bounds: Bounds): Rock[] {
   return rocks.map((rock) => updateRock(rock, dt, bounds))
+}
+
+/** The tier a rock splits INTO, or null if it despawns: large → medium,
+ * medium → small, small → gone ("2 small → gone"). */
+const SPLIT_CHILD: Readonly<Record<RockSize, RockSize | null>> = {
+  large: 'medium',
+  medium: 'small',
+  small: null,
+}
+
+/** Clamp x into [lo, hi]. */
+function clamp(x: number, lo: number, hi: number): number {
+  return Math.min(Math.max(x, lo), hi)
+}
+
+/** A-7: split a destroyed rock into its children — large → 2 medium, medium →
+ * 2 small, small → [] (gone). The GEOMETRIC half of destruction only: what
+ * TRIGGERS a split is A-8 (collision), scoring is A-9. Each child spawns at the
+ * parent's exact position (no offset) and inherits the parent's drift heading
+ * with an INDEPENDENT random angular spread; its speed is the inherited speed
+ * scaled by the child tier's factor and RE-CLAMPED into that tier's band (so a
+ * fast parent can't hand down an over-speed child, and a near-still parent still
+ * yields drifting children); its shape variant is rerolled. Velocity stays in
+ * the cabinet's per-60Hz-frame unit, so children drift consistently via updateRock.
+ *
+ * Pure over the rock (never mutates it). Consumes the passed rng — advances its
+ * seed, exactly like spawnRock — so A-8's caller clones state.rng before calling.
+ * A small rock draws NO randomness (early return) so despawns never desync spawns. */
+export function splitRock(rock: Rock, rng: Rng): Rock[] {
+  const childSize = SPLIT_CHILD[rock.size]
+  if (childSize === null) return []
+
+  const parentAngle = Math.atan2(rock.velocity.y, rock.velocity.x)
+  const parentSpeed = Math.hypot(rock.velocity.x, rock.velocity.y)
+
+  const child = (): Rock => {
+    const angle = parentAngle + (nextFloat(rng) * 2 - 1) * SPLIT_SPREAD_ANGLE
+    const speed = clamp(
+      parentSpeed * SPLIT_SPEED_SCALE[childSize],
+      ROCK_SPEED_MIN[childSize],
+      ROCK_SPEED_MAX[childSize],
+    )
+    const shapeVariant = nextInt(rng, ROCK_SHAPE_VARIANT_COUNT)
+    return {
+      pos: { x: rock.pos.x, y: rock.pos.y },
+      velocity: { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
+      size: childSize,
+      shapeVariant,
+    }
+  }
+
+  return [child(), child()]
 }
