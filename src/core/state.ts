@@ -80,6 +80,11 @@ export interface GameState {
    * firing edge-triggered (A-4, ShipBulletSR $63): a shot spawns only on a fresh
    * low→high press, so holding fire does not auto-fire. */
   firePrev: boolean
+  /** A-8: latched true once the ship is destroyed by a rock collision. Sticky —
+   * a dead ship is out of the collision-active set until A-15 (respawn/invuln)
+   * clears it. `ship` stays non-null (a single-ship model, not a list), so this
+   * flag is the "removed from the active list" signal. */
+  shipDestroyed: boolean
 }
 
 const DEFAULT_SEED = 1979
@@ -104,5 +109,7 @@ export function initialState(seed: number = DEFAULT_SEED): GameState {
     saucer: null,
     // Fire not held at boot, so the very first press reads as a rising edge.
     firePrev: false,
+    // Ship starts alive; a rock collision (A-8) latches this true.
+    shipDestroyed: false,
   }
 }

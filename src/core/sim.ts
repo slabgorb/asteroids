@@ -6,16 +6,24 @@
 // ship's flight model; A-4 added firing; A-6 drifts the rocks. Saucers and
 // rock spawning (the wave director) arrive in later stories.
 
-import type { GameState } from './state'
+import type { GameState, Rock, Bullet, Vec2 } from './state'
 import { WORLD_W, WORLD_H } from './state'
 import type { Input } from './input'
 import type { Rng } from './rng'
-import { stepShip } from './ship'
+import { stepShip, SHIP_HITBOX } from './ship'
 import { stepBullets } from './bullet'
-import { updateRocks } from './rocks'
-import type { Bounds } from './bounds'
+import { updateRocks, splitRock, ROCK_HITBOX } from './rocks'
+import { wrappedDelta, type Bounds } from './bounds'
 
 const WORLD_BOUNDS: Bounds = { width: WORLD_W, height: WORLD_H }
+
+/** Wrap-aware overlap: true when `a` and `b` are within `extent` on BOTH axes
+ * across the toroidal field (an AABB of half-extent `extent`, measured by the
+ * shortest seam-crossing displacement). */
+function overlaps(a: Vec2, b: Vec2, extent: number): boolean {
+  const d = wrappedDelta(a, b, WORLD_BOUNDS)
+  return Math.abs(d.x) < extent && Math.abs(d.y) < extent
+}
 
 export function stepGame(state: GameState, input: Input, dt: number): GameState {
   // Clone the RNG so this step never mutates the caller's state — the one
@@ -29,8 +37,35 @@ export function stepGame(state: GameState, input: Input, dt: number): GameState 
 
   // Rocks drift only during play; attract-mode behaviour is A-10's call
   // (spawning doesn't exist yet, so the gate is unobservable until then).
-  const rocks =
+  let rocks =
     state.mode === 'playing' ? updateRocks(state.rocks, dt, WORLD_BOUNDS) : state.rocks
+  let liveBullets: Bullet[] = bullets
+  let shipDestroyed = state.shipDestroyed
+
+  // Collision + destruction runs on the post-move positions, during play only.
+  if (state.mode === 'playing') {
+    // Bullet-vs-rock: a shot destroys the FIRST rock it overlaps (one shot, one
+    // rock) and is consumed. A large/medium rock becomes splitRock's children;
+    // a small rock despawns to nothing (drawing no rng). splitRock mutates `rng`
+    // — this step's own clone of state.rng — so the advanced seed is threaded
+    // forward in the returned state, keeping the replay deterministic.
+    const working: Rock[] = [...rocks]
+    const survivors: Bullet[] = []
+    for (const bullet of liveBullets) {
+      const hit = working.findIndex((r) => overlaps(bullet.pos, r.pos, ROCK_HITBOX[r.size]))
+      if (hit === -1) survivors.push(bullet)
+      else working.splice(hit, 1, ...splitRock(working[hit], rng))
+    }
+    rocks = working
+    liveBullets = survivors
+
+    // Ship-vs-rock: overlapping any rock destroys the ship. Rocks are unaffected
+    // — ramming does not split them (that is a bullet's job). Sticky: once true
+    // it stays true until A-15's respawn/invuln clears it.
+    if (!shipDestroyed) {
+      shipDestroyed = rocks.some((r) => overlaps(ship.pos, r.pos, SHIP_HITBOX + ROCK_HITBOX[r.size]))
+    }
+  }
 
   return {
     ...state,
@@ -38,7 +73,8 @@ export function stepGame(state: GameState, input: Input, dt: number): GameState 
     tick: state.tick + 1,
     ship,
     rocks,
-    bullets,
+    bullets: liveBullets,
     firePrev,
+    shipDestroyed,
   }
 }

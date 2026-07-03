@@ -32,6 +32,11 @@ export const SHIP_ROTATION_RATE = 3
  * speed is legitimately sqrt(2) times this. */
 export const SHIP_MAX_SPEED = 16383 / 256
 
+/** A-8: the ship's collision half-extent, world lo-units. Provisional — the
+ * ship silhouette is ~200 lo-units (A-5), so roughly half that as a hitbox;
+ * the ROM's exact ship-vs-rock extent is unconfirmed. Verify vs quarry (A-17). */
+export const SHIP_HITBOX = 96
+
 /** ThrustTbl ($57b9): 65-entry quarter sine, amplitude 127, bytes verbatim
  * from the ROM. Index 0..64 spans a quarter circle; the other quadrants are
  * folded onto it by sign/index reflection (CalcXThrust/CalcThrustDir). */
