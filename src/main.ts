@@ -1,65 +1,56 @@
 // src/main.ts
 //
-// Bootstrap: owns the canvas and wires the shell's fixed-timestep loop to the
-// pure core. `step` advances `GameState` through `stepGame`; `render` is a
-// stub for this story (A-5 does real rendering) — it just re-draws the A-1
-// placeholder ship triangle so the tab isn't blank. No input capture yet
-// (NO_INPUT stands in); that arrives with A-3+.
+// Bootstrap: own the canvas and wire the shell (keyboard input + fixed-timestep
+// loop + vector renderer) to the pure core. A-5 makes the cabinet playable — the
+// ship the core has simulated since A-3 is finally drawn, and real keys drive it.
+// Through A-4 the sim ran headless behind NO_INPUT with a placeholder triangle;
+// now `render()` paints the live GameState and `createInputController` feeds real
+// rotate/thrust/fire/hyperspace into `stepGame`.
 
 import { createLoop } from './shell/loop'
-import { initialState } from './core/state'
+import { initialState, type GameState } from './core/state'
 import { stepGame } from './core/sim'
-import { NO_INPUT } from './core/input'
+import type { Input } from './core/input'
+import { createInputController } from './shell/input'
+import { render } from './shell/render'
 
 const canvas = document.getElementById('game') as HTMLCanvasElement
 const ctx = canvas.getContext('2d')!
 
-let state = initialState()
+let dpr = Math.min(2, window.devicePixelRatio || 1)
+let W = window.innerWidth
+let H = window.innerHeight
 
-function draw(): void {
-  const dpr = Math.min(2, window.devicePixelRatio || 1)
-  const W = window.innerWidth
-  const H = window.innerHeight
+function resize(): void {
+  dpr = Math.min(2, window.devicePixelRatio || 1)
+  W = window.innerWidth
+  H = window.innerHeight
   canvas.width = Math.floor(W * dpr)
   canvas.height = Math.floor(H * dpr)
   canvas.style.width = `${W}px`
   canvas.style.height = `${H}px`
-
-  ctx.save()
-  ctx.scale(dpr, dpr)
-
-  // Black field.
-  ctx.fillStyle = '#000'
-  ctx.fillRect(0, 0, W, H)
-
-  // Placeholder ship: a glowing vector triangle at screen centre, nose up.
-  const cx = W / 2
-  const cy = H / 2
-  const r = 24
-  ctx.strokeStyle = '#ffffff'
-  ctx.lineWidth = 2
-  ctx.shadowColor = '#ffffff'
-  ctx.shadowBlur = 8
-  ctx.beginPath()
-  ctx.moveTo(cx, cy - r) // nose
-  ctx.lineTo(cx + r * 0.7, cy + r) // right tail
-  ctx.lineTo(cx, cy + r * 0.5) // notch
-  ctx.lineTo(cx - r * 0.7, cy + r) // left tail
-  ctx.closePath()
-  ctx.stroke()
-
-  ctx.restore()
 }
+window.addEventListener('resize', resize)
+resize()
 
-window.addEventListener('resize', draw)
-draw()
+const input = createInputController()
+let state: GameState = initialState()
+// The renderer needs the frame's input to draw the thrust flame — the pure core
+// carries no "thrusting" flag (GameState.ship is pos/vel/dir only). Sample once
+// per fixed step and reuse in render; seeded with an all-false sample so the
+// first frame (which runs before any step) already has a value.
+let frameInput: Input = input.sample()
 
 const loop = createLoop(
   (dt) => {
-    state = stepGame(state, NO_INPUT, dt)
+    frameInput = input.sample()
+    state = stepGame(state, frameInput, dt)
   },
   () => {
-    draw()
+    ctx.save()
+    ctx.scale(dpr, dpr)
+    render(ctx, state, W, H, frameInput)
+    ctx.restore()
   },
 )
 loop.start()
