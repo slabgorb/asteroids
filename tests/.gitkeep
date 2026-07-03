@@ -1,0 +1,2 @@
+# Vitest suites (TDD against the pure core) land here starting A-2.
+# `npm test` runs green on an empty suite via --passWithNoTests.

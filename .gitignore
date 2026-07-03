@@ -1,0 +1,31 @@
+node_modules/
+dist/
+.DS_Store
+# Pennyfarthing runtime
+.session/
+.claude/settings.local.json
+.pennyfarthing/config.local.yaml
+# Frame server runtime files
+.frame-port
+frame-pid
+tui-pid
+# Local pf shim (machine-specific absolute paths)
+.pennyfarthing/bin/
+# tmux runtime cache files
+.pennyfarthing/tmux-status
+.pennyfarthing/tmux-status-left
+.pennyfarthing/tmux-status-right
+.pennyfarthing/tmux-activity
+# Local tmux config (copied from sample)
+tmux.conf
+
+# subagent-driven-development scratch (ledger, briefs, review packages)
+.superpowers/
+
+# Reference disassembly — the commented reverse-engineered source of Atari's
+# Asteroids (1979). A derivative of copyrighted code, kept purely as a local
+# learning/reference quarry. NEVER committed or pushed.
+reference/
+
+# Audio assets — baked/served separately (e.g. Cloudflare R2), not committed
+sfx/

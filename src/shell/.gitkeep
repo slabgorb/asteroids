@@ -1,0 +1,3 @@
+# The IO shell (render / input / loop / audio / storage), added in A-2.
+# Kept as an empty tracked directory so the core/shell boundary exists from
+# the scaffold on. The shell consumes core output; game math stays in core/.

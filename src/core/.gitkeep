@@ -1,0 +1,3 @@
+# The pure, deterministic simulation core (state / sim / rng), added in A-2.
+# Kept as an empty tracked directory so the core/shell boundary exists from
+# the scaffold on. core/ must never import from shell/ or touch the DOM.
