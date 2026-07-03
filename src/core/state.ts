@@ -16,9 +16,18 @@ export interface Vec2 {
   y: number
 }
 
-/** The player's ship. Position only for now; heading/velocity arrive in A-3. */
+// The toroidal playfield, in ROM lo-units (8 per screen pixel at 1024x768).
+// UpdateObjPos ($6fc7) wraps X mod $20 hi-units and Y at $18 hi-units:
+// 32*256 x 24*256. Wrap is a sim concern — never a render trick.
+export const WORLD_W = 8192
+export const WORLD_H = 6144
+
+/** The player's ship (A-3). `vel` is world-units per 60 Hz frame; `dir` is a
+ * 256-unit circle (ShipDir byte), 0 = +x, counterclockwise positive. */
 export interface Ship {
   pos: Vec2
+  vel: Vec2
+  dir: number
 }
 
 /** A rock's size tier — large rocks split into medium, medium into small. */
@@ -67,7 +76,13 @@ export function initialState(seed: number = DEFAULT_SEED): GameState {
     wave: 0,
     score: 0,
     lives: 0,
-    ship: { pos: { x: 0, y: 0 } },
+    // Center spawn, pointing up (dir 64 of 256), at rest — the ROM zeroes
+    // ShipXSpeed/ShipYSpeed on spawn ($6b30).
+    ship: {
+      pos: { x: WORLD_W / 2, y: WORLD_H / 2 },
+      vel: { x: 0, y: 0 },
+      dir: 64,
+    },
     rocks: [],
     bullets: [],
     saucer: null,
