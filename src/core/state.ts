@@ -33,9 +33,17 @@ export interface Ship {
 /** A rock's size tier — large rocks split into medium, medium into small. */
 export type RockSize = 'large' | 'medium' | 'small'
 
+/** An asteroid (A-6). ROM-confirmed: rocks never turn — their position
+ * updates are pure velocity accumulation ($6FCA-$7013) and only the ship has
+ * a facing byte — so there is deliberately no such field here. */
 export interface Rock {
   pos: Vec2
+  /** Drift, world-units per 60 Hz frame — the same unit as Ship.vel/Bullet.vel. */
+  velocity: Vec2
   size: RockSize
+  /** Fixed visual identity in [0, ROCK_SHAPE_VARIANT_COUNT), chosen at spawn
+   * and never changed afterwards (rocks.ts owns the count). */
+  shapeVariant: number
 }
 
 /** A player (or saucer) shot in flight (A-4). `vel` is world-units per 60 Hz
