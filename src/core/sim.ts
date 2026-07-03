@@ -13,6 +13,7 @@ import type { Rng } from './rng'
 import { stepShip, SHIP_HITBOX } from './ship'
 import { stepBullets } from './bullet'
 import { updateRocks, splitRock, ROCK_HITBOX } from './rocks'
+import { updateWaveDirector } from './waves'
 import { applyScore } from './score'
 import { wrappedDelta, type Bounds } from './bounds'
 
@@ -82,7 +83,7 @@ export function stepGame(state: GameState, input: Input, dt: number): GameState 
     }
   }
 
-  return {
+  const stepped: GameState = {
     ...state,
     rng,
     tick: state.tick + 1,
@@ -94,4 +95,9 @@ export function stepGame(state: GameState, input: Input, dt: number): GameState 
     firePrev,
     shipDestroyed,
   }
+
+  // The wave director spawns the next wave once the field is clear (play only).
+  // It runs on the post-step state and clones the rng itself, so any spawn draws
+  // are threaded into the returned state without touching the caller's rng.
+  return updateWaveDirector(stepped, dt)
 }
