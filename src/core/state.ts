@@ -85,6 +85,12 @@ export interface GameState {
    * clears it. `ship` stays non-null (a single-ship model, not a list), so this
    * flag is the "removed from the active list" signal. */
   shipDestroyed: boolean
+  /** A-10: seconds remaining before the wave director spawns the next wave.
+   * `0` means "not counting" (boot, or a wave in progress). The director arms it
+   * to `WAVE_DELAY_S` the first tick it finds the field clear, counts it down each
+   * tick after, and re-arms it when a wave spawns — so every inter-wave gap is a
+   * uniform delay, never an instant respawn. */
+  waveTransitionTimer: number
 }
 
 const DEFAULT_SEED = 1979
@@ -111,5 +117,9 @@ export function initialState(seed: number = DEFAULT_SEED): GameState {
     firePrev: false,
     // Ship starts alive; a rock collision (A-8) latches this true.
     shipDestroyed: false,
+    // `0` = not counting; once play begins the wave director arms this and counts
+    // it down, spawning wave 1 after WAVE_DELAY_S via the same path as every later
+    // transition (no special first-spawn branch) (A-10).
+    waveTransitionTimer: 0,
   }
 }
