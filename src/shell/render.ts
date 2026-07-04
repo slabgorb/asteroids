@@ -29,11 +29,18 @@ import {
 import { ROCK_HITBOX } from '../core/rocks'
 import { formatScore } from '../core/score'
 import type { Input } from '../core/input'
+import { marginRects, fitScale } from './margin'
 
 const SHIP_COLOR = '#ffffff' // 1979 Asteroids is white-phosphor monochrome
 const FLAME_COLOR = '#ffb454' // warm thrust flame (A-19 recalibrates palette)
 const GLOW_BLUR = 8
 const LINE_WIDTH = 2
+
+// A2-1: the non-playable margin overlay. The play area is pure black (#000), so a
+// *lightening* wash — not a dark one, which would vanish on black — frames the
+// arena inside an off-4:3 window. Low alpha keeps it subtle; the HUD draws on top
+// and stays crisp. Opacity is a feel value, calibrated in the dev server.
+const MARGIN_MASK_COLOR = 'rgba(255, 255, 255, 0.06)'
 
 // HUD / overlay type (A-16). Vector Battle is the vendored arcade face
 // (shell/font.ts); Orbitron/monospace is the CSS fallback when it fails to load.
@@ -345,6 +352,18 @@ function drawGameOverOverlay(
   drawText(ctx, echo, w / 2, h * 0.65, BANNER_FONT, 'center')
 }
 
+/** Overlay the non-playable margin (letterbox/pillarbox bars) with a faint light
+ *  wash so the black play area reads as a clearly bounded arena. Drawn after the
+ *  world and before the HUD, so it frames the arena without dimming HUD text. A
+ *  flat fill — no glow. */
+function drawMarginMask(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  ctx.save()
+  ctx.shadowBlur = 0
+  ctx.fillStyle = MARGIN_MASK_COLOR
+  for (const bar of marginRects(w, h)) ctx.fillRect(bar.x, bar.y, bar.w, bar.h)
+  ctx.restore()
+}
+
 /** Paint one frame: a fresh black field, then rocks, the saucer (when live),
  *  shots, and the ship on top — with the thrust flame when the current input is
  *  thrusting — then the HUD and the mode overlay. In attract the ship is absent
@@ -361,7 +380,7 @@ export function render(
   ctx.fillStyle = '#000'
   ctx.fillRect(0, 0, w, h)
 
-  const view: View = { w, h, scale: Math.min(w / WORLD_W, h / WORLD_H) }
+  const view: View = { w, h, scale: fitScale(w, h) }
   for (const rock of state.rocks) drawRock(ctx, rock, view)
   if (state.saucer) drawSaucer(ctx, state.saucer, view)
   for (const bullet of state.bullets) drawBullet(ctx, bullet, view)
@@ -370,6 +389,7 @@ export function render(
     if (input.thrust) drawFlame(ctx, state.ship, view)
   }
 
+  drawMarginMask(ctx, w, h)
   drawHud(ctx, state, w)
   if (state.mode === 'attract') drawAttractOverlay(ctx, state, w, h)
   if (state.mode === 'gameover') drawGameOverOverlay(ctx, state, w, h)
