@@ -102,7 +102,7 @@ export function tryRespawnShip(state: GameState): GameState {
   return {
     ...state,
     shipDestroyed: false,
-    ship: { pos: { ...CENTER }, vel: { x: 0, y: 0 }, dir: 64 },
+    ship: { pos: { ...CENTER }, vel: { x: 0, y: 0 }, dir: 64, visible: true },
     shipSpawnTimer: RESPAWN_INVULNERABILITY_S,
   }
 }

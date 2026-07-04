@@ -47,7 +47,7 @@ function playing(seed: number, over: Partial<GameState> = {}): GameState {
 }
 
 function shipAt(pos: Vec2): GameState['ship'] {
-  return { pos: { ...pos }, vel: { x: 0, y: 0 }, dir: 64 }
+  return { pos: { ...pos }, vel: { x: 0, y: 0 }, dir: 64, visible: true }
 }
 
 function rockAt(pos: Vec2, size: RockSize): Rock {

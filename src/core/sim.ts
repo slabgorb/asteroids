@@ -22,6 +22,7 @@ import { updateSpawnDirector, stepSaucer, SAUCER_HITBOX, SAUCER_ROCK_COLLISION_E
 import { applyScore, addScore, SAUCER_SCORE } from './score'
 import { insertHighScore } from './highscore'
 import { handleShipDeath, tryRespawnShip } from './lives'
+import { triggerHyperspace } from './hyperspace'
 import { wrappedDelta, type Bounds } from './bounds'
 import type { GameEvent } from './events'
 
@@ -214,13 +215,27 @@ export function enterInitial(state: GameState, char: string): GameState {
   return { ...state, gameOver: { ...over, initials: over.initials + char.toUpperCase() } }
 }
 
-export function stepGame(state: GameState, input: Input, dt: number): GameState {
+export function stepGame(inState: GameState, input: Input, dt: number): GameState {
+  // `state` is rebindable: A-14 rebinds it to the post-hyperspace state below,
+  // so the rest of the step (collisions, death, respawn) reads the jumped ship.
+  let state = inState
+
   // Start is edge-triggered (the firePrev pattern): a press held across a mode
   // transition is consumed by the transition and must not fire again.
   const startPressed = input.start && !state.startPrev
 
   if (state.mode === 'attract') return stepAttract(state, input, dt, startPressed)
   if (state.mode === 'gameover') return stepGameOver(state, input, dt, startPressed)
+
+  // A-14: apply the hyperspace jump FIRST — before the rng clone and every
+  // collision check — so a successful jump's invulnerability window (or a failed
+  // jump's death) takes the ship out of the hit set THIS tick, and the survival/
+  // position rolls consume the head of this step's rng stream. Rebind `state` to
+  // the post-jump result; capture the PRE-jump death latch for the respawn gate,
+  // so a ship killed by a failed jump still spends one full tick dead before
+  // A-15 revives it — the same one-tick-dead rule as a collision death.
+  const wasDeadBefore = state.shipDestroyed
+  state = triggerHyperspace(state, input)
 
   // Clone the RNG so this step never mutates the caller's state — the one
   // exception to "never touch `state`, only read it": the clone is a fresh
@@ -372,11 +387,17 @@ export function stepGame(state: GameState, input: Input, dt: number): GameState 
     if (input.thrust) events.push({ type: 'thrust-stop' })
   }
 
+  // A-14: the hyperspace hidden-window closes when shipSpawnTimer reaches zero
+  // this tick — reveal the ship on that edge. A-15's respawn window keeps the
+  // ship visible throughout, so revealing is a no-op there.
+  const revealedShip =
+    state.shipSpawnTimer > 0 && shipSpawnTimer === 0 ? { ...ship, visible: true } : ship
+
   let stepped: GameState = {
     ...state,
     rng,
     tick: state.tick + 1,
-    ship,
+    ship: revealedShip,
     rocks,
     bullets: liveBullets,
     saucer,
@@ -401,11 +422,12 @@ export function stepGame(state: GameState, input: Input, dt: number): GameState 
     stepped = handleShipDeath(stepped)
   }
 
-  // The respawn attempt runs every playing tick but on the PRE-step latch, so
-  // a ship destroyed this very step spends at least one full tick dead before
-  // it may reappear at a clear center (A-15). The wait is unbounded — a
-  // crowded center just means trying again next tick.
-  if (state.shipDestroyed) {
+  // The respawn attempt runs every playing tick but on the PRE-step latch
+  // (`wasDeadBefore`, captured before the hyperspace jump), so a ship destroyed
+  // this very step — by a collision OR a failed hyperspace jump — spends at
+  // least one full tick dead before it may reappear at a clear center (A-15).
+  // The wait is unbounded — a crowded center just means trying again next tick.
+  if (wasDeadBefore) {
     stepped = tryRespawnShip(stepped)
   }
 

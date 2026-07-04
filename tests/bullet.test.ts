@@ -109,7 +109,7 @@ describe('spawn on fire (AC-1)', () => {
   it('spawns the bullet at the ship, displaced forward along the heading (never behind)', () => {
     // Ship at rest, world centre, facing +x (dir 0). The bullet appears at or
     // ahead of the ship along +x, aligned in y — never behind, never sideways.
-    const ship = { pos: { x: WORLD_W / 2, y: WORLD_H / 2 }, vel: { x: 0, y: 0 }, dir: 0 }
+    const ship = { pos: { x: WORLD_W / 2, y: WORLD_H / 2 }, vel: { x: 0, y: 0 }, dir: 0, visible: true }
     const b = fireOnce(playing(1, ship)).bullets[0]
     expect(b.pos.y).toBeCloseTo(WORLD_H / 2, 6) // heading is pure +x → no y offset
     expect(b.pos.x).toBeGreaterThanOrEqual(WORLD_W / 2 - 1e-6) // at or ahead of ship

@@ -124,7 +124,7 @@ describe('stepGame — score awarded per destroyed rock by tier (AC-1)', () => {
   })
 
   it('scores NOTHING when the ship rams a rock (ram destroys no rock)', () => {
-    const ship = { pos: { ...CENTER }, vel: { x: 0, y: 0 }, dir: 64 }
+    const ship = { pos: { ...CENTER }, vel: { x: 0, y: 0 }, dir: 64, visible: true }
     const s1 = stepGame(
       playing(4242, { ship, rocks: [rockAt(CENTER, 'large')], bullets: [], score: 700 }),
       NO_INPUT,

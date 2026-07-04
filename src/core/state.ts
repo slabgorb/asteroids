@@ -30,6 +30,11 @@ export interface Ship {
   pos: Vec2
   vel: Vec2
   dir: number
+  /** A-14: false while a hyperspace jump is in flight (the ship is gone from the
+   * playfield during its reappearance window, GameState.shipSpawnTimer); true
+   * otherwise. A-15's respawn-invulnerability window keeps the ship visible, so
+   * only hyperspace sets this false. The renderer skips a hidden ship. */
+  visible: boolean
 }
 
 /** A rock's size tier — large rocks split into medium, medium into small. */
@@ -199,6 +204,8 @@ export function initialState(seed: number = DEFAULT_SEED): GameState {
       pos: { x: WORLD_W / 2, y: WORLD_H / 2 },
       vel: { x: 0, y: 0 },
       dir: 64,
+      // A boot ship is on the playfield; only a hyperspace jump hides it (A-14).
+      visible: true,
     },
     rocks: [],
     bullets: [],

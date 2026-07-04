@@ -70,7 +70,7 @@ function bulletAt(pos: Vec2, over: Partial<Bullet> = {}): Bullet {
 
 /** A motionless ship at `pos`, nose-up. */
 function shipAt(pos: Vec2): Ship {
-  return { pos: { ...pos }, vel: { x: 0, y: 0 }, dir: 64 }
+  return { pos: { ...pos }, vel: { x: 0, y: 0 }, dir: 64, visible: true }
 }
 
 /** A motionless rock at `pos` (zero drift → stable across a step). */
