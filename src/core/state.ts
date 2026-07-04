@@ -53,11 +53,22 @@ export interface Bullet {
   pos: Vec2
   vel: Vec2
   life: number
+  /** Who fired it (A-11). Player and saucer shots share one `state.bullets`
+   * array; the discriminant keeps their caps independent (A-4's 4-shot cap vs
+   * SAUCER_MAX_BULLETS) and lets collision routing filter by owner (A-13). */
+  owner: 'player' | 'saucer'
 }
 
-/** The flying-saucer enemy. */
+/** The flying-saucer enemy (A-11: the large variant). `velocity` is world-units
+ * per 60 Hz frame — a constant horizontal crossing speed plus a vertical
+ * component rerolled on the course cadence. `courseTimer`/`fireTimer` are the
+ * per-saucer countdowns (seconds) to the next vertical-course reroll and the
+ * next shot. A-12 adds a `size` discriminant; this story is large-only. */
 export interface Saucer {
   pos: Vec2
+  velocity: Vec2
+  courseTimer: number
+  fireTimer: number
 }
 
 /** Run lifecycle: the cabinet idles on attract, plays a run, then game-over. */
@@ -91,6 +102,12 @@ export interface GameState {
    * tick after, and re-arms it when a wave spawns — so every inter-wave gap is a
    * uniform delay, never an instant respawn. */
   waveTransitionTimer: number
+  /** A-11: seconds remaining before the spawn director may spawn the next large
+   * saucer. `0` means "not counting" (boot, or a saucer just cleared); the
+   * director arms it to a wave-scaled reload the first tick it finds no saucer +
+   * a live ship, counts it down, and spawns one saucer when it elapses. Only one
+   * saucer lives at a time, so the timer rests while `saucer !== null`. */
+  saucerSpawnTimer: number
 }
 
 const DEFAULT_SEED = 1979
@@ -121,5 +138,8 @@ export function initialState(seed: number = DEFAULT_SEED): GameState {
     // it down, spawning wave 1 after WAVE_DELAY_S via the same path as every later
     // transition (no special first-spawn branch) (A-10).
     waveTransitionTimer: 0,
+    // `0` = not counting; the spawn director arms/counts/spawns the first saucer
+    // the same way once play begins with the ship alive (A-11).
+    saucerSpawnTimer: 0,
   }
 }

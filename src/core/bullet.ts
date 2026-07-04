@@ -70,6 +70,7 @@ function advance(bullets: readonly Bullet[], frames: number): Bullet[] {
       },
       vel: { x: b.vel.x, y: b.vel.y },
       life,
+      owner: b.owner,
     })
   }
   return out
@@ -98,8 +99,12 @@ export function stepBullets(
   const frames = dt * 60
   const next = advance(bullets, frames)
 
+  // The 4-shot cap counts PLAYER shots only — saucer shots (A-11) share this
+  // array but have their own SAUCER_MAX_BULLETS cap, so the two never crowd
+  // each other out.
   const risingEdge = input.fire && !firePrev
-  if (risingEdge && next.length < MAX_PLAYER_SHOTS) {
+  const playerShots = next.reduce((n, b) => (b.owner === 'player' ? n + 1 : n), 0)
+  if (risingEdge && playerShots < MAX_PLAYER_SHOTS) {
     next.push({
       pos: { x: ship.pos.x, y: ship.pos.y },
       vel: {
@@ -107,6 +112,7 @@ export function stepBullets(
         y: muzzleAxis(sinLookup(ship.dir)) + ship.vel.y,
       },
       life: BULLET_LIFETIME_FRAMES,
+      owner: 'player',
     })
   }
 

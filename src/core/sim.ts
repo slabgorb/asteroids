@@ -14,6 +14,7 @@ import { stepShip, SHIP_HITBOX } from './ship'
 import { stepBullets } from './bullet'
 import { updateRocks, splitRock, ROCK_HITBOX } from './rocks'
 import { updateWaveDirector } from './waves'
+import { updateSpawnDirector, stepSaucer } from './saucer'
 import { applyScore } from './score'
 import { wrappedDelta, type Bounds } from './bounds'
 
@@ -56,6 +57,12 @@ export function stepGame(state: GameState, input: Input, dt: number): GameState 
     const working: Rock[] = [...rocks]
     const survivors: Bullet[] = []
     for (const bullet of liveBullets) {
+      // Only PLAYER shots destroy rocks; saucer shots (A-11) pass through — their
+      // collisions (saucer-bullet vs ship, etc.) are A-13, not this story.
+      if (bullet.owner !== 'player') {
+        survivors.push(bullet)
+        continue
+      }
       const hit = working.findIndex((r) => overlaps(bullet.pos, r.pos, ROCK_HITBOX[r.size]))
       if (hit === -1) {
         survivors.push(bullet)
@@ -96,8 +103,15 @@ export function stepGame(state: GameState, input: Input, dt: number): GameState 
     shipDestroyed,
   }
 
+  // The saucer subsystem (play only): move/fire/despawn the live saucer, then let
+  // the spawn director bring the next one when none is alive. Each clones the rng
+  // itself, so draws thread forward without touching the caller's rng. Runs BEFORE
+  // the wave director, whose "field clear" gate includes `saucer === null` — so a
+  // live saucer holds off the next wave (A-10 forward-compat gate).
+  const withSaucer = updateSpawnDirector(stepSaucer(stepped, dt), dt)
+
   // The wave director spawns the next wave once the field is clear (play only).
   // It runs on the post-step state and clones the rng itself, so any spawn draws
   // are threaded into the returned state without touching the caller's rng.
-  return updateWaveDirector(stepped, dt)
+  return updateWaveDirector(withSaucer, dt)
 }
