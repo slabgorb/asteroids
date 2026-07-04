@@ -262,7 +262,12 @@ describe('drag (AC-2, AC-3)', () => {
   })
 
   it('never reverses direction and brings the ship to rest (AC-3)', () => {
-    let s = playing(1, { vel: { x: 1.5, y: -1.5 }, dir: 0 })
+    // A-15: immortalize the ship for this pure-physics run — the wave
+    // director (A-10) spawns rocks into any long playing-mode simulation, and
+    // an incidental collision would freeze the dead ship mid-measurement now
+    // that death stops flight. Collision behavior is collision.test.ts /
+    // lives.test.ts territory; this test isolates drag.
+    let s: GameState = { ...playing(1, { vel: { x: 1.5, y: -1.5 }, dir: 0 }), shipSpawnTimer: Infinity }
     let prevMagX = Math.abs(s.ship.vel.x)
     let prevMagY = Math.abs(s.ship.vel.y)
     for (let i = 0; i < 2400; i++) {
@@ -340,7 +345,10 @@ describe('screen wrap — toroidal, in the sim (AC-4)', () => {
     // seam once. (A continuously-spiralling script cannot serve here: the
     // thrust integral of a rotating heading largely cancels — measured
     // final speed ~35.6 — and the ship may never reach a seam at all.)
-    let s = playing(7)
+    // A-15: immortalized for the same reason as the drag run above — a wave
+    // rock catching the ship mid-flight would end the thrust and the wrap
+    // count with it. This test isolates the toroidal wrap at speed.
+    let s: GameState = { ...playing(7), shipSpawnTimer: Infinity }
     let prev = s.ship.pos
     let wrapsX = 0
     let wrapsY = 0

@@ -6,10 +6,12 @@
 // ship's flight model; A-4 added firing; A-6 drifts the rocks. A-16 closes
 // A-2's mode loop: attract is a rocks-drift backdrop a start press turns into a
 // real game, and a final death runs the game-over/high-score framing before
-// returning to attract.
+// returning to attract. A-15 replaces A-16's terminal-death stub with the real
+// lives model: a death with ships in reserve decrements and waits for a clear
+// center to respawn (core/lives.ts) instead of ending the run.
 
-import type { GameState, GameOverPhase, Mode, Rock, Bullet, Vec2 } from './state'
-import { WORLD_W, WORLD_H, STARTING_LIVES, initialState } from './state'
+import type { GameState, Rock, Bullet, Vec2 } from './state'
+import { WORLD_W, WORLD_H, STARTING_LIVES, GAME_OVER_DISPLAY_S, initialState } from './state'
 import type { Input } from './input'
 import type { Rng } from './rng'
 import { stepShip, SHIP_HITBOX } from './ship'
@@ -18,15 +20,15 @@ import { updateRocks, splitRock, ROCK_HITBOX } from './rocks'
 import { updateWaveDirector } from './waves'
 import { updateSpawnDirector, stepSaucer } from './saucer'
 import { applyScore } from './score'
-import { qualifiesForHighScore, insertHighScore } from './highscore'
+import { insertHighScore } from './highscore'
+import { handleShipDeath, tryRespawnShip } from './lives'
 import { wrappedDelta, type Bounds } from './bounds'
 
 const WORLD_BOUNDS: Bounds = { width: WORLD_W, height: WORLD_H }
 
-/** Seconds the non-qualifying GAME OVER card is displayed before the cabinet
- * returns to attract on its own. Provisional feel value — the ROM's exact
- * attract-page timings are A-17's quarry. verify vs quarry (A-17). */
-export const GAME_OVER_DISPLAY_S = 3
+// Re-exported for compatibility: the constant moved to state.ts (A-15) so
+// core/lives.ts can initialise the gameover phase without an import cycle.
+export { GAME_OVER_DISPLAY_S }
 
 /** Wrap-aware overlap: true when `a` and `b` are within `extent` on BOTH axes
  * across the toroidal field (an AABB of half-extent `extent`, measured by the
@@ -130,9 +132,23 @@ export function stepGame(state: GameState, input: Input, dt: number): GameState 
   // mutable value threaded into the returned state, never the original.
   const rng: Rng = { seed: state.rng.seed }
 
+  // A-15: a ship dead between lives is deaf and disarmed — it neither steers
+  // nor spawns fresh shots — but shots already in flight keep flying and
+  // aging. Forcing the fire shift-register high while dead suppresses the
+  // spawn edge without forking stepBullets, and the returned firePrev still
+  // tracks the physical button, so a press held across death -> respawn is
+  // consumed exactly once (the startPrev precedent).
+  //
   // Fire in the direction the ship now faces, inheriting its updated velocity.
-  const ship = stepShip(state.ship, input, dt)
-  const { bullets, firePrev } = stepBullets(state.bullets, ship, state.firePrev, input, dt)
+  const shipAlive = !state.shipDestroyed
+  const ship = shipAlive ? stepShip(state.ship, input, dt) : state.ship
+  const { bullets, firePrev } = stepBullets(
+    state.bullets,
+    ship,
+    shipAlive ? state.firePrev : true,
+    input,
+    dt,
+  )
 
   let rocks = updateRocks(state.rocks, dt, WORLD_BOUNDS)
   let liveBullets: Bullet[] = bullets
@@ -176,43 +192,26 @@ export function stepGame(state: GameState, input: Input, dt: number): GameState 
   rocks = working
   liveBullets = survivors
 
-  // Ship-vs-rock: overlapping any rock destroys the ship. Rocks are unaffected
-  // — ramming does not split them (that is a bullet's job). Sticky: once true
-  // it stays true until A-15's respawn/invuln clears it.
-  if (!shipDestroyed) {
+  // The invulnerability window (A-15) decays by sim time FIRST, clamped at
+  // zero, so its final tick still shields — the collision check consults the
+  // decayed value (checking pre-decay would stretch the window a tick, and
+  // float residue from repeated dt subtraction would stretch it further). A
+  // dead ship's timer is already zero; it re-arms only on respawn.
+  const shipSpawnTimer = Math.max(0, state.shipSpawnTimer - dt)
+
+  // Ship-vs-rock: overlapping any rock destroys the ship — unless the post-
+  // respawn invulnerability window is still open (nonzero timer = unhittable,
+  // the isInvulnerable contract). Rocks are unaffected — ramming does not
+  // split them (that is a bullet's job). Sticky: once true it stays true
+  // until tryRespawnShip revives the ship at a clear center.
+  if (!shipDestroyed && shipSpawnTimer <= 0) {
     shipDestroyed = rocks.some((r) => overlaps(ship.pos, r.pos, SHIP_HITBOX + ROCK_HITBOX[r.size]))
   }
 
-  // A-16's terminal-death stub of the A-15 seam: on the destruction EDGE (not
-  // the sticky latch), the run ENDS — enter 'gameover' this same step with all
-  // reserves forfeit (lives -> 0), deciding the qualifying path off the
-  // persisted board. Reserves must not keep the run alive: with no respawn
-  // until A-15, a decrement-and-continue branch strands an invisible immortal
-  // ship and makes the high-score board unreachable for exactly the bonus-ship
-  // runs that qualify (review round 1, [HIGH]). Bonus ships are display-only
-  // until A-15 replaces this branch with decrement + safe-respawn while ships
-  // remain, keeping the "destroyed with none left -> gameover" edge. The
-  // `lives > 0` guard keeps legacy lives-0 free-play states (every pre-A-16
-  // fixture) latching the old sticky flag without a mode change.
-  let mode: Mode = state.mode
-  let gameOver: GameOverPhase | null = state.gameOver
-  if (!state.shipDestroyed && shipDestroyed && lives > 0) {
-    lives = 0
-    mode = 'gameover'
-    gameOver = {
-      qualifies: qualifiesForHighScore(state.highScoreTable, score),
-      initials: '',
-      confirmed: false,
-      displayTimer: GAME_OVER_DISPLAY_S,
-    }
-  }
-
-  const stepped: GameState = {
+  let stepped: GameState = {
     ...state,
     rng,
     tick: state.tick + 1,
-    mode,
-    gameOver,
     ship,
     rocks,
     bullets: liveBullets,
@@ -221,6 +220,26 @@ export function stepGame(state: GameState, input: Input, dt: number): GameState 
     firePrev,
     startPrev: input.start,
     shipDestroyed,
+    shipSpawnTimer,
+  }
+
+  // A-15's death seam (replacing A-16's terminal stub): on the destruction
+  // EDGE (not the sticky latch), one death has one consequence —
+  // handleShipDeath decrements and keeps playing while ships remain, or ends
+  // the run at zero exactly as A-16 pinned. The seam consumes the POST-award
+  // lives, so a bonus ship earned by a shot in this same step is a real
+  // reserve. The `lives > 0` guard preserves the legacy lives-0 free-play
+  // niche (pre-A-16 fixtures): latch sticky, no decrement, no gameover.
+  if (!state.shipDestroyed && shipDestroyed && lives > 0) {
+    stepped = handleShipDeath(stepped)
+  }
+
+  // The respawn attempt runs every playing tick but on the PRE-step latch, so
+  // a ship destroyed this very step spends at least one full tick dead before
+  // it may reappear at a clear center (A-15). The wait is unbounded — a
+  // crowded center just means trying again next tick.
+  if (state.shipDestroyed) {
+    stepped = tryRespawnShip(stepped)
   }
 
   // The saucer subsystem (play only): move/fire/despawn the live saucer, then let
