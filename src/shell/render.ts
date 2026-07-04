@@ -49,6 +49,14 @@ const HUD_FONT = "700 22px 'Vector Battle', 'Orbitron', monospace"
 const SMALL_FONT = "700 16px 'Vector Battle', 'Orbitron', monospace"
 const BANNER_FONT = "900 48px 'Vector Battle', 'Orbitron', monospace"
 
+// A2-2: inter-glyph tracking for the caps-only Vector Battle face — the thin
+// vector strokes read as cramped at the canvas default (0). Expressed as ~0.1em
+// and derived from each run's OWN px size (parsed from its font string) so every
+// size — 16px small, 22px HUD, 48px banner — gets proportional spacing. Mirrors
+// star-wars' glowText (shell/render.ts), the sibling that shares this face. A
+// feel value; eyeballed in the dev server per the epic's render guardrail.
+const HUD_TRACKING_EM = 0.1
+
 // Attract overlay cadence: the ROM's pre-game routine cycles the PUSH START
 // prompt with the high-score list; exact page timings are A-17's quarry, so
 // this is a provisional 4s-per-page feel value. verify vs quarry (A-17).
@@ -283,6 +291,11 @@ function drawText(
   align: CanvasTextAlign,
 ): void {
   ctx.font = font
+  // ~0.1em tracking off this run's px size (see HUD_TRACKING_EM). Every on-screen
+  // text run flows through here, so setting it per call fully controls tracking;
+  // it never bleeds to the vector strokes (letterSpacing affects text only).
+  const px = /(\d+(?:\.\d+)?)px/.exec(font)
+  ctx.letterSpacing = `${((px ? parseFloat(px[1]) : 16) * HUD_TRACKING_EM).toFixed(2)}px`
   ctx.textAlign = align
   ctx.fillStyle = SHIP_COLOR
   ctx.shadowColor = SHIP_COLOR
