@@ -261,9 +261,90 @@ describe('A-14 stepGame — the hidden/invulnerable window drains and reveals', 
 
   it('does not re-trigger a jump while the window is open, even with hyperspace held', () => {
     // A second jump would draw RNG and re-arm the timer to a fresh full window;
-    // holding the key must not do that — the debounce is the open window itself.
+    // holding the key must not do that — the window guard blocks it mid-jump.
     const afterHold = stepGame(armed, HYPER, DT)
     expect(afterHold.shipSpawnTimer).toBeLessThan(HYPERSPACE_TIMER_S) // decayed, not re-armed
     expect(afterHold.ship.visible).toBe(false) // still mid-window
+  })
+})
+
+// ==== RED REWORK (round-trip 1) — reviewer-confirmed HIGH defects ================
+// Review found (all empirically confirmed): a FAILED jump was silent — no
+// explosion event, and no thrust-stop for a thrusting death — because sim.ts's
+// event edge re-reads the post-jump `shipDestroyed`; and a HELD hyperspace key
+// auto-repeats jumps once the window closes (no edge debounce). These pin the
+// correct behavior: a failed jump is a complete ship death like any other, and
+// hyperspace is edge-triggered like fire/thrust/start.
+
+describe('A-14 stepGame — a failed hyperspace jump is a COMPLETE ship death (rework RT1)', () => {
+  it('emits a ship-explosion and spends exactly one life (no double-count)', () => {
+    const out = stepGame(playing(DIE_SEED, { lives: 3 }), HYPER, DT)
+    expect(out.shipDestroyed).toBe(true)
+    expect(out.lives).toBe(2) // exactly one death — not two (no double handleShipDeath)
+    // every other ship death emits this cue (see events.test.ts / sim.ts); a
+    // failed jump must not be the silent exception.
+    expect(out.events).toContainEqual({ type: 'explosion', source: 'ship' })
+  })
+
+  it('stops a still-thrusting engine on a failed jump (thrust-stop event)', () => {
+    const out = stepGame(playing(DIE_SEED, { thrustPrev: true }), { ...HYPER, thrust: true }, DT)
+    expect(out.shipDestroyed).toBe(true)
+    // the engine hum must not drone on through gameover — the same guard a
+    // collision death gets.
+    expect(out.events).toContainEqual({ type: 'thrust-stop' })
+  })
+
+  it('ends the run when the LAST ship self-destructs (gameover)', () => {
+    const out = stepGame(playing(DIE_SEED, { lives: 1 }), HYPER, DT)
+    expect(out.mode).toBe('gameover')
+    expect(out.lives).toBe(0)
+    expect(out.gameOver).not.toBeNull()
+  })
+})
+
+describe('A-14 hyperspace is EDGE-triggered — a held key does not auto-repeat (rework RT1)', () => {
+  it('does not re-trigger a jump when hyperspace is HELD across the window closing', () => {
+    let s = stepGame(playing(SURVIVE_SEED), HYPER, DT) // exactly one jump
+    expect(s.shipSpawnTimer).toBeGreaterThan(0)
+    expect(s.shipDestroyed).toBe(false)
+    let windowClosed = false
+    let retriggered = false
+    for (let i = 0; i < 60; i++) {
+      const prevTimer = s.shipSpawnTimer
+      s = stepGame(s, HYPER, DT) // key stays HELD the whole time
+      if (prevTimer > 0 && s.shipSpawnTimer === 0) windowClosed = true
+      // once the window has closed, a fresh window OR a death means a second jump
+      // auto-fired off the held key — the bug this rework fixes.
+      if (windowClosed && prevTimer === 0 && (s.shipSpawnTimer > 0 || s.shipDestroyed)) {
+        retriggered = true
+      }
+    }
+    expect(windowClosed).toBe(true) // sanity: the first window drained during the loop
+    expect(retriggered).toBe(false) // a held panic button fires ONCE, never repeats
+  })
+
+  it('re-arms after the key is released — a fresh press still jumps (no permanent latch)', () => {
+    let s = stepGame(playing(SURVIVE_SEED), HYPER, DT) // jump 1
+    let ticks = 0
+    while (s.shipSpawnTimer > 0 && ticks < 100) {
+      s = stepGame(s, NO_INPUT, DT) // drain with the key RELEASED — no auto-repeat either way
+      ticks++
+    }
+    expect(s.shipSpawnTimer).toBe(0)
+    expect(s.shipDestroyed).toBe(false)
+    const afterSecondPress = stepGame(s, HYPER, DT) // a distinct new press
+    // must act (new window or death), proving the edge-guard isn't a one-jump-ever latch
+    expect(afterSecondPress.shipSpawnTimer > 0 || afterSecondPress.shipDestroyed).toBe(true)
+  })
+})
+
+describe('A-14 rollHyperspacePosition — axis-draw order is pinned (rework RT1)', () => {
+  it('feeds the first draw to x and the second to y (golden — catches a swap)', () => {
+    const seed = 31337
+    const r = { seed }
+    const span = 1 - 2 * HYPERSPACE_EDGE_MARGIN
+    const expectedX = (HYPERSPACE_EDGE_MARGIN + nextFloat(r) * span) * WORLD_W
+    const expectedY = (HYPERSPACE_EDGE_MARGIN + nextFloat(r) * span) * WORLD_H
+    expect(rollHyperspacePosition({ seed }, BOUNDS)).toEqual({ x: expectedX, y: expectedY })
   })
 })
