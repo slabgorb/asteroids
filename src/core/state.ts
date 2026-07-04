@@ -9,6 +9,7 @@
 // splitting/firing arrive in A-3+.
 
 import { createRng, type Rng } from './rng'
+import type { HighScoreTable } from './highscore'
 
 /** Screen-space position. 2D, top-down — no third axis in this cabinet. */
 export interface Vec2 {
@@ -74,6 +75,30 @@ export interface Saucer {
 /** Run lifecycle: the cabinet idles on attract, plays a run, then game-over. */
 export type Mode = 'attract' | 'playing' | 'gameover'
 
+/** Ships dealt out on a start press (A-16). STUB — one play per attract cycle,
+ * because no respawn exists yet: a multi-life count would soft-lock on the first
+ * death. A-15 (lives/safe-respawn/invulnerability) swaps in the ROM value.
+ * verify vs quarry (A-15). */
+export const STARTING_LIVES = 1
+
+/** The game-over phase, nested under GameState (A-16) — A-2's Mode union is NOT
+ * extended for "entering initials"; that sub-state lives here instead. `null`
+ * outside 'gameover' mode. On the qualifying path the player types up to 3
+ * initials (sim.ts enterInitial) and confirms with the start button; on the
+ * non-qualifying path `displayTimer` counts down (seconds) and the cabinet
+ * returns to attract on its own. */
+export interface GameOverPhase {
+  /** qualifiesForHighScore(highScoreTable, score), computed once on entry. */
+  qualifies: boolean
+  /** Initials typed so far (0-3 chars, uppercase A-Z). */
+  initials: string
+  /** Reserved for a confirmed-but-still-displaying state; the current flow
+   * returns to attract in the same step as the confirm. */
+  confirmed: boolean
+  /** Seconds left on the non-qualifying GAME OVER display. */
+  displayTimer: number
+}
+
 export interface GameState {
   rng: Rng
   mode: Mode
@@ -108,6 +133,16 @@ export interface GameState {
    * a live ship, counts it down, and spawns one saucer when it elapses. Only one
    * saucer lives at a time, so the timer rests while `saucer !== null`. */
   saucerSpawnTimer: number
+  /** A-16: previous frame's start-button state — the same shift-register
+   * debounce as firePrev, so attract-start and initials-confirm each consume a
+   * fresh press and a button held across a mode transition fires only once. */
+  startPrev: boolean
+  /** A-16: the game-over phase; `null` outside 'gameover' mode. */
+  gameOver: GameOverPhase | null
+  /** A-16: the high-score board. The shell loads it from localStorage at boot
+   * and persists it on change; inside the core it is ordinary deterministic
+   * state (qualify on gameover entry, insert on confirm). */
+  highScoreTable: HighScoreTable
 }
 
 const DEFAULT_SEED = 1979
@@ -141,5 +176,11 @@ export function initialState(seed: number = DEFAULT_SEED): GameState {
     // `0` = not counting; the spawn director arms/counts/spawns the first saucer
     // the same way once play begins with the ship alive (A-11).
     saucerSpawnTimer: 0,
+    // Start not held at boot, so the very first press reads as a rising edge (A-16).
+    startPrev: false,
+    // Boot idles on attract with no game-over phase; the shell replaces the empty
+    // board with whatever localStorage holds (A-16).
+    gameOver: null,
+    highScoreTable: [],
   }
 }

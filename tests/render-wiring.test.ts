@@ -98,16 +98,24 @@ describe('main.ts — wires the renderer and real input (AC-1, AC-5)', () => {
     ).toBe(false)
   })
 
-  it("boots into 'playing' until A-16 lands the attract/start flow (PROVISIONAL)", () => {
-    // initialState() boots 'attract', and nothing transitions out of it until
-    // A-16 — but the wave/saucer directors and collisions all gate on 'playing'
-    // (waves.ts updateWaveDirector), so an attract boot is a rockless field
-    // forever. Until the real start flow exists, main.ts must force play mode.
-    // A-16's TEA REPLACES this contract with the attract→start→playing flow.
+  it("boots into attract — the A-11 force-play shim is gone (A-16 replaces the provisional contract)", () => {
+    // The inverse of the contract this replaces: A-11's provisional
+    // `{ ...initialState(), mode: 'playing' }` boot shim must NOT survive A-16 —
+    // the sim now owns attract→start→playing (tests/modes.test.ts pins the
+    // behaviour; this pins that main.ts stopped forcing the mode).
     expect(existsSync(MAIN)).toBe(true)
     expect(
-      /['"]playing['"]/.test(read(MAIN)),
-      "main.ts must boot the sim into 'playing' (provisional until A-16)",
-    ).toBe(true)
+      /mode:\s*['"]playing['"]/.test(read(MAIN)),
+      "main.ts must not force the boot mode to 'playing' (A-16 attract flow)",
+    ).toBe(false)
+  })
+
+  it('wires the A-16 framing: persisted board in, board changes out, letters to enterInitial', () => {
+    expect(existsSync(MAIN)).toBe(true)
+    const src = read(MAIN)
+    expect(/\bloadHighScores\s*\(/.test(src), 'main.ts must load the board at boot').toBe(true)
+    expect(/\bsaveHighScores\s*\(/.test(src), 'main.ts must persist board changes').toBe(true)
+    expect(/\benterInitial\s*\(/.test(src), 'main.ts must feed letters to enterInitial').toBe(true)
+    expect(/\bloadVectorFont\s*\(/.test(src), 'main.ts must kick off the HUD font load').toBe(true)
   })
 })

@@ -13,14 +13,18 @@ export interface InputController {
   sample(): Input
 }
 
-// Cabinet controls: rotate left/right, thrust, fire, hyperspace. Arrow keys are
-// primary; WASD + K are convenience alternates.
+// Cabinet controls: rotate left/right, thrust, fire, hyperspace, start. Arrow
+// keys are primary; WASD + K are convenience alternates. Space doubles as fire
+// AND start — safe because start is inert during play and fire is inert in
+// attract/gameover (the sim gates each by mode); Enter is the start/confirm
+// primary, matching the initials-entry confirm (A-16).
 const KEYS = {
   left: ['ArrowLeft', 'KeyA'],
   right: ['ArrowRight', 'KeyD'],
   thrust: ['ArrowUp', 'KeyW'],
   fire: ['Space', 'KeyK'],
   hyperspace: ['ArrowDown', 'KeyS', 'ShiftLeft', 'ShiftRight'],
+  start: ['Enter', 'Space'],
 } as const
 
 // Keys the browser would otherwise scroll the page with — the cabinet owns them.
@@ -47,6 +51,7 @@ export function createInputController(): InputController {
         thrust: any(KEYS.thrust),
         fire: any(KEYS.fire),
         hyperspace: any(KEYS.hyperspace),
+        start: any(KEYS.start),
       }
     },
   }

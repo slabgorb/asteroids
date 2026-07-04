@@ -3,16 +3,19 @@
 // Bootstrap: own the canvas and wire the shell (keyboard input + fixed-timestep
 // loop + vector renderer) to the pure core. A-5 makes the cabinet playable — the
 // ship the core has simulated since A-3 is finally drawn, and real keys drive it.
-// Through A-4 the sim ran headless behind NO_INPUT with a placeholder triangle;
-// now `render()` paints the live GameState and `createInputController` feeds real
-// rotate/thrust/fire/hyperspace into `stepGame`.
+// A-16 closes the run lifecycle: the cabinet boots into attract for real, the
+// persisted high-score board rides in GameState, letters feed the initials entry
+// on a qualifying game-over, and any change to the board is written back to
+// localStorage (where the lobby tile reads it).
 
 import { createLoop } from './shell/loop'
 import { initialState, type GameState } from './core/state'
-import { stepGame } from './core/sim'
+import { stepGame, enterInitial } from './core/sim'
 import type { Input } from './core/input'
 import { createInputController } from './shell/input'
 import { render } from './shell/render'
+import { loadHighScores, saveHighScores } from './shell/storage'
+import { loadVectorFont } from './shell/font'
 
 const canvas = document.getElementById('game') as HTMLCanvasElement
 const ctx = canvas.getContext('2d')!
@@ -34,12 +37,18 @@ window.addEventListener('resize', resize)
 resize()
 
 const input = createInputController()
-// PROVISIONAL (A-16 replaces this): boot straight into play. initialState()
-// boots 'attract' and nothing transitions out of it until A-16 lands the
-// attract/start flow — but the wave and saucer directors and collisions all
-// gate on 'playing' (waves.ts updateWaveDirector), so an attract boot is a
-// rockless field forever. A-16 swaps this for the real attract→start flow.
-let state: GameState = { ...initialState(), mode: 'playing' }
+// Boot into attract for real (A-16 replaces A-11's provisional force-play shim):
+// the sim now owns the attract→start→gameover loop, and the persisted board is
+// threaded into core state where the qualify/insert logic reads it.
+let state: GameState = { ...initialState(), highScoreTable: loadHighScores() }
+// Best-effort: the HUD falls back to the CSS stack until/unless the face loads.
+void loadVectorFont()
+// Initials entry (A-16): typed letters are edge events, not held state, so they
+// bypass the per-frame Input sample and feed the core's pure event function.
+// enterInitial is inert outside a qualifying game-over, so no mode guard here.
+window.addEventListener('keydown', (e: KeyboardEvent) => {
+  if (/^[a-zA-Z]$/.test(e.key)) state = enterInitial(state, e.key)
+})
 // The renderer needs the frame's input to draw the thrust flame — the pure core
 // carries no "thrusting" flag (GameState.ship is pos/vel/dir only). Sample once
 // per fixed step and reuse in render; seeded with an all-false sample so the
@@ -49,7 +58,11 @@ let frameInput: Input = input.sample()
 const loop = createLoop(
   (dt) => {
     frameInput = input.sample()
+    const table = state.highScoreTable
     state = stepGame(state, frameInput, dt)
+    // Persist the board the moment the core changes it (a confirmed entry) —
+    // insertHighScore returns a NEW array, so reference identity is the signal.
+    if (state.highScoreTable !== table) saveHighScores(state.highScoreTable)
   },
   () => {
     ctx.save()

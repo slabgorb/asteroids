@@ -27,12 +27,33 @@ import {
   type Saucer,
 } from '../core/state'
 import { ROCK_HITBOX } from '../core/rocks'
+import { formatScore } from '../core/score'
 import type { Input } from '../core/input'
 
 const SHIP_COLOR = '#ffffff' // 1979 Asteroids is white-phosphor monochrome
 const FLAME_COLOR = '#ffb454' // warm thrust flame (A-19 recalibrates palette)
 const GLOW_BLUR = 8
 const LINE_WIDTH = 2
+
+// HUD / overlay type (A-16). Vector Battle is the vendored arcade face
+// (shell/font.ts); Orbitron/monospace is the CSS fallback when it fails to load.
+// The face is CAPS-ONLY — every string below renders uppercase.
+const HUD_FONT = "700 22px 'Vector Battle', 'Orbitron', monospace"
+const SMALL_FONT = "700 16px 'Vector Battle', 'Orbitron', monospace"
+const BANNER_FONT = "900 48px 'Vector Battle', 'Orbitron', monospace"
+
+// Attract overlay cadence: the ROM's pre-game routine cycles the PUSH START
+// prompt with the high-score list; exact page timings are A-17's quarry, so
+// this is a provisional 4s-per-page feel value. verify vs quarry (A-17).
+const ATTRACT_CYCLE_TICKS = 240
+
+// Life-icon geometry, screen px: a mini nose-up ship per reserve ship, in a row
+// under the score readout. Provisional feel values — the glyph becomes the
+// ROM-exact ship shape in A-17 and size/glow are calibrated in A-19.
+// verify vs quarry (A-17).
+const LIFE_ICON_H = 18
+const LIFE_ICON_W = 12
+const LIFE_ICON_GAP = 8
 
 // Rock outline radius per tier, world lo-units: the collision half-extent
 // (rocks.ts ROCK_HITBOX, 132/72/42) drawn ~30% proud, so rocks die a touch
@@ -245,10 +266,91 @@ function drawSaucer(ctx: CanvasRenderingContext2D, saucer: Saucer, view: View): 
   )
 }
 
+/** One glowing HUD text run at a screen-space position. */
+function drawText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  font: string,
+  align: CanvasTextAlign,
+): void {
+  ctx.font = font
+  ctx.textAlign = align
+  ctx.fillStyle = SHIP_COLOR
+  ctx.shadowColor = SHIP_COLOR
+  ctx.shadowBlur = GLOW_BLUR
+  ctx.fillText(text, x, y)
+}
+
+/** One mini nose-up ship glyph, screen px, for the reserve-lives row. */
+function drawLifeIcon(ctx: CanvasRenderingContext2D, cx: number, cy: number): void {
+  ctx.strokeStyle = SHIP_COLOR
+  ctx.shadowColor = SHIP_COLOR
+  ctx.shadowBlur = GLOW_BLUR
+  ctx.lineWidth = LINE_WIDTH
+  ctx.beginPath()
+  ctx.moveTo(cx, cy - LIFE_ICON_H / 2) // nose
+  ctx.lineTo(cx + LIFE_ICON_W / 2, cy + LIFE_ICON_H / 2) // right wing
+  ctx.lineTo(cx, cy + LIFE_ICON_H / 4) // tail notch
+  ctx.lineTo(cx - LIFE_ICON_W / 2, cy + LIFE_ICON_H / 2) // left wing
+  ctx.closePath()
+  ctx.stroke()
+}
+
+/** The always-on HUD (A-16, the first story to draw score/lives at all): the
+ *  current score, the running high score — the max of the persisted board's top
+ *  entry and the live run, so beating the board updates the readout in place —
+ *  and a mini-ship per reserve life. */
+function drawHud(ctx: CanvasRenderingContext2D, state: GameState, w: number): void {
+  const scoreX = w * 0.25
+  drawText(ctx, formatScore(state.score), scoreX, 44, HUD_FONT, 'right')
+  const highest = Math.max(state.highScoreTable[0]?.score ?? 0, state.score)
+  drawText(ctx, formatScore(highest), w / 2, 32, SMALL_FONT, 'center')
+  for (let i = 0; i < state.lives; i++) {
+    drawLifeIcon(ctx, scoreX - LIFE_ICON_W / 2 - i * (LIFE_ICON_W + LIFE_ICON_GAP), 64)
+  }
+}
+
+/** The attract overlay, cycling the start prompt with the high-score board the
+ *  way the ROM's pre-game routine pages between them. */
+function drawAttractOverlay(ctx: CanvasRenderingContext2D, state: GameState, w: number, h: number): void {
+  const page = Math.floor(state.tick / ATTRACT_CYCLE_TICKS) % 2
+  if (page === 0 || state.highScoreTable.length === 0) {
+    drawText(ctx, 'ASTEROIDS', w / 2, h * 0.4, BANNER_FONT, 'center')
+    drawText(ctx, 'PUSH START', w / 2, h * 0.55, HUD_FONT, 'center')
+    return
+  }
+  drawText(ctx, 'HIGH SCORES', w / 2, h * 0.3, HUD_FONT, 'center')
+  state.highScoreTable.forEach((entry, i) => {
+    const row = `${String(i + 1).padStart(2, ' ')}  ${entry.name}  ${formatScore(entry.score)}`
+    drawText(ctx, row, w / 2, h * 0.3 + (i + 1) * 26, SMALL_FONT, 'center')
+  })
+}
+
+/** The game-over overlay: the GAME OVER card, plus the initials-entry prompt
+ *  (typed letters echoed with underscore placeholders) on the qualifying path. */
+function drawGameOverOverlay(
+  ctx: CanvasRenderingContext2D,
+  state: GameState,
+  w: number,
+  h: number,
+): void {
+  drawText(ctx, 'GAME OVER', w / 2, h * 0.4, BANNER_FONT, 'center')
+  const over = state.gameOver
+  if (over === null || !over.qualifies) return
+  drawText(ctx, 'YOUR SCORE IS ONE OF THE TEN BEST', w / 2, h * 0.52, SMALL_FONT, 'center')
+  drawText(ctx, 'PLEASE ENTER YOUR INITIALS', w / 2, h * 0.57, SMALL_FONT, 'center')
+  const echo = `${over.initials}${'_'.repeat(3 - over.initials.length)}`
+  drawText(ctx, echo, w / 2, h * 0.65, BANNER_FONT, 'center')
+}
+
 /** Paint one frame: a fresh black field, then rocks, the saucer (when live),
  *  shots, and the ship on top — with the thrust flame when the current input is
- *  thrusting. A destroyed ship (A-8's sticky latch) leaves the drawn set until
- *  A-15 respawns it. Pure over `state` — reads, never writes. */
+ *  thrusting — then the HUD and the mode overlay. In attract the ship is absent
+ *  (the field is a rocks-only backdrop, A-16); in play a destroyed ship (A-8's
+ *  sticky latch) leaves the drawn set until A-15 respawns it. Pure over `state`
+ *  — reads, never writes. */
 export function render(
   ctx: CanvasRenderingContext2D,
   state: GameState,
@@ -263,8 +365,12 @@ export function render(
   for (const rock of state.rocks) drawRock(ctx, rock, view)
   if (state.saucer) drawSaucer(ctx, state.saucer, view)
   for (const bullet of state.bullets) drawBullet(ctx, bullet, view)
-  if (!state.shipDestroyed) {
+  if (state.mode !== 'attract' && !state.shipDestroyed) {
     drawShip(ctx, state.ship, view)
     if (input.thrust) drawFlame(ctx, state.ship, view)
   }
+
+  drawHud(ctx, state, w)
+  if (state.mode === 'attract') drawAttractOverlay(ctx, state, w, h)
+  if (state.mode === 'gameover') drawGameOverOverlay(ctx, state, w, h)
 }
