@@ -87,7 +87,7 @@ function rockAt(pos: Vec2, size: RockSize = 'large'): Rock {
 /** A parked saucer at `pos` with both cadence timers held high, so a short
  * test never sees it reroll course or fire. */
 function saucerAt(pos: Vec2): Saucer {
-  return { pos: { ...pos }, velocity: { x: 0, y: 0 }, courseTimer: 9, fireTimer: 9 }
+  return { pos: { ...pos }, velocity: { x: 0, y: 0 }, size: 'large', courseTimer: 9, fireTimer: 9 }
 }
 
 /** A motionless, long-lived bullet at `pos` owned by `owner`. */
