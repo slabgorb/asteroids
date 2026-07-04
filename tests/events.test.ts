@@ -273,6 +273,7 @@ describe('saucer siren events', () => {
     const saucer: GameState['saucer'] = {
       pos: { x: WORLD_W - 1, y: 100 },
       velocity: { x: 16, y: 0 },
+      size: 'large',
       courseTimer: 999,
       fireTimer: 999,
     }
@@ -285,6 +286,7 @@ describe('saucer siren events', () => {
     const saucer: GameState['saucer'] = {
       pos: { x: WORLD_W / 2, y: 100 },
       velocity: { x: 16, y: 0 },
+      size: 'large',
       courseTimer: 999,
       fireTimer: 999,
     }
