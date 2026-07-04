@@ -44,7 +44,9 @@ export function playEventSounds(audio: SoundPlayer, events: readonly GameEvent[]
         audio.stopLoop('thrust')
         break
       case 'saucer-siren-start':
-        audio.startLoop('saucerSiren')
+        // A-13 size split: the small saucer gets its own siren sample; both share
+        // one loop channel in the engine, so only one ever rings.
+        audio.startLoop(event.size === 'small' ? 'saucerSirenSmall' : 'saucerSiren')
         break
       case 'saucer-siren-stop':
         audio.stopLoop('saucerSiren')

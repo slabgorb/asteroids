@@ -30,7 +30,8 @@ export type SoundName =
   | 'explosionMedium'
   | 'explosionSmall'
   | 'thrust'
-  | 'saucerSiren'
+  | 'saucerSiren' // the LARGE saucer's siren
+  | 'saucerSirenSmall' // the SMALL saucer's siren (A-13 size split) — shares the siren channel
   | 'heartbeat'
 
 export interface AudioEngine {
@@ -55,9 +56,9 @@ export interface AudioEngine {
 //   - the ship explosion reuses the biggest rock bang — the cabinet has a single
 //     explosion circuit, with no distinct ship-death sound;
 //   - the heartbeat alternates two thump samples (the classic lub-DUB).
-// `saucerSmall.wav` (small-saucer siren) and `extraShip.wav` (bonus-life cue)
-// are in the R2 sample set too but stay UNWIRED here — they belong to A-13's
-// per-size siren cadence and a future bonus-life story, not A-18's scope.
+// `extraShip.wav` (bonus-life cue) is in the R2 sample set too but stays
+// UNWIRED here — it belongs to a future bonus-life story, not A-18's scope.
+// `saucerSmall.wav` IS wired now (A-13 integration: the small saucer's siren).
 type SampleId =
   | 'fire'
   | 'bangLarge'
@@ -65,6 +66,7 @@ type SampleId =
   | 'bangSmall'
   | 'thrust'
   | 'saucerBig'
+  | 'saucerSmall'
   | 'beat1'
   | 'beat2'
 
@@ -75,6 +77,7 @@ const SAMPLE_FILES: Record<SampleId, string> = {
   bangSmall: 'bangSmall.wav',
   thrust: 'thrust.wav',
   saucerBig: 'saucerBig.wav',
+  saucerSmall: 'saucerSmall.wav',
   beat1: 'beat1.wav',
   beat2: 'beat2.wav',
 }
@@ -208,6 +211,7 @@ export function createAudioEngine(): AudioEngine {
         break
       case 'thrust':
       case 'saucerSiren':
+      case 'saucerSirenSmall':
         // Sustained sounds — driven through startLoop/stopLoop, not play().
         break
       default: {
@@ -219,13 +223,17 @@ export function createAudioEngine(): AudioEngine {
   }
 
   function startLoop(name: SoundName): void {
+    // Both sirens share the 'saucerSiren' channel, so starting one (or the same
+    // saucer changing size mid-life, which never happens) steals the other —
+    // only one siren ever rings.
     if (name === 'thrust') playSample('thrust', true, 'thrust')
     else if (name === 'saucerSiren') playSample('saucerBig', true, 'saucerSiren')
+    else if (name === 'saucerSirenSmall') playSample('saucerSmall', true, 'saucerSiren')
   }
 
   function stopLoop(name: SoundName): void {
     if (name === 'thrust') stopChannel('thrust')
-    else if (name === 'saucerSiren') stopChannel('saucerSiren')
+    else if (name === 'saucerSiren' || name === 'saucerSirenSmall') stopChannel('saucerSiren')
   }
 
   function ready(): boolean {

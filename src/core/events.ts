@@ -9,7 +9,7 @@
 // proven design for this arcade project family); this is a fresh, asteroids-
 // native union, not shared code (CLAUDE.md: share the pattern, not the code).
 
-import type { RockSize } from './state'
+import type { RockSize, SaucerSize } from './state'
 
 /** The player fired a shot (rising edge of the fire button, under the
  * MAX_PLAYER_SHOTS cap, ship alive). Saucer shots get no cue of their own —
@@ -39,15 +39,17 @@ export interface ThrustStopEvent {
   type: 'thrust-stop'
 }
 
-/** A saucer just spawned — start the sustained siren loop. Scope note (A-18):
- * this pairs only with the spawn/far-edge-despawn lifecycle already in
- * sim.ts; a bullet-kill stop is story A-13's territory (saucer collision +
- * siren cadence), not wired here. */
+/** A saucer just spawned — start the sustained siren loop. `size` is the new
+ * saucer's tier (A-13 added the small/large distinction) so the shell picks the
+ * big vs small siren sample. */
 export interface SaucerSirenStartEvent {
   type: 'saucer-siren-start'
+  size: SaucerSize
 }
 
-/** The live saucer is gone (far-edge despawn) — stop the siren loop. */
+/** The live saucer is gone — stop the siren loop. Fires for EVERY way a saucer
+ * leaves: a bullet kill, a ram, a rock collision (all A-13), or the far-edge
+ * despawn (A-11). Size-agnostic — one channel carries whichever siren played. */
 export interface SaucerSirenStopEvent {
   type: 'saucer-siren-stop'
 }

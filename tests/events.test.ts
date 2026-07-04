@@ -294,6 +294,32 @@ describe('saucer siren events', () => {
     expect(out.saucer).not.toBeNull()
     expect(eventsOfType(out, 'saucer-siren-stop')).toHaveLength(0)
   })
+
+  // A-13 integration: A-13 added the bullet↔saucer kill. The siren must now stop
+  // on that kill (not only the far-edge despawn) — the reviewer's filed finding.
+  it('emits saucer-siren-stop when a player bullet destroys the saucer', () => {
+    const saucer: GameState['saucer'] = {
+      pos: { ...CENTER },
+      velocity: { x: 0, y: 0 },
+      size: 'large',
+      courseTimer: 999,
+      fireTimer: 999,
+    }
+    const out = stepGame(playing(1, { saucer, bullets: [bulletAt(CENTER)] }), NO_INPUT, DT)
+    expect(out.saucer).toBeNull() // the shot destroyed it (A-13)
+    expect(eventsOfType(out, 'saucer-siren-stop')).toHaveLength(1)
+  })
+
+  // A-13 integration: the start event carries the spawned saucer's size so the
+  // shell can pick the big vs small siren sample.
+  it("the siren-start carries the spawned saucer's size", () => {
+    const out = stepGame(playing(4242, { saucerSpawnTimer: 1 / 60 }), NO_INPUT, DT)
+    const starts = eventsOfType(out, 'saucer-siren-start')
+    expect(starts).toHaveLength(1)
+    const sc = out.saucer
+    expect(sc).not.toBeNull()
+    if (sc) expect(starts[0].size).toBe(sc.size)
+  })
 })
 
 // --- accelerating heartbeat (AC-6) ---------------------------------------

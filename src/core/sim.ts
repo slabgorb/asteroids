@@ -10,7 +10,7 @@
 // lives model: a death with ships in reserve decrements and waits for a clear
 // center to respawn (core/lives.ts) instead of ending the run.
 
-import type { GameState, Rock, Bullet, Vec2 } from './state'
+import type { GameState, Rock, Bullet, Vec2, Saucer } from './state'
 import { WORLD_W, WORLD_H, STARTING_LIVES, GAME_OVER_DISPLAY_S, initialState } from './state'
 import type { Input } from './input'
 import type { Rng } from './rng'
@@ -56,16 +56,22 @@ function withHeartbeat(state: GameState, dt: number): GameState {
   return { ...state, heartbeatTimer: heartbeatInterval(state.rocks.length), events: [...state.events, event] }
 }
 
-/** Append a saucer-siren start/stop event when the live saucer appears or
- * disappears between `before` (this frame's pre-saucer-step state) and
- * `after` (post spawn-director/stepSaucer). Scope note (A-18): only the
- * spawn/far-edge-despawn lifecycle is covered — a bullet-kill stop is A-13's
- * territory (see session Design Deviations). */
-function withSirenEdge(before: GameState, after: GameState): GameState {
-  const hadSaucer = before.saucer !== null
-  const hasSaucer = after.saucer !== null
-  if (hadSaucer === hasSaucer) return after
-  const event: GameEvent = hadSaucer ? { type: 'saucer-siren-stop' } : { type: 'saucer-siren-start' }
+/** Append a saucer-siren start/stop event when the saucer appears or disappears
+ * across the WHOLE frame — comparing the INCOMING saucer (`incomingSaucer`,
+ * before any of this frame's collisions) to the FINAL one (`after`, post
+ * collision + stepSaucer + spawn director). Comparing the incoming state (not
+ * the post-collision one) is what makes the stop fire for EVERY way a saucer
+ * dies — a bullet kill, a ram, or a rock collision (all A-13), plus the
+ * far-edge despawn (A-11) — not just the despawn. The start carries the new
+ * saucer's size so the shell picks the big vs small siren. */
+function withSirenEdge(incomingSaucer: Saucer | null, after: GameState): GameState {
+  const had = incomingSaucer !== null
+  const next = after.saucer
+  if (had === (next !== null)) return after
+  const event: GameEvent =
+    next !== null
+      ? { type: 'saucer-siren-start', size: next.size }
+      : { type: 'saucer-siren-stop' }
   return { ...after, events: [...after.events, event] }
 }
 
@@ -408,7 +414,7 @@ export function stepGame(state: GameState, input: Input, dt: number): GameState 
   // itself, so draws thread forward without touching the caller's rng. Runs BEFORE
   // the wave director, whose "field clear" gate includes `saucer === null` — so a
   // live saucer holds off the next wave (A-10 forward-compat gate).
-  const withSaucer = withSirenEdge(stepped, updateSpawnDirector(stepSaucer(stepped, dt), dt))
+  const withSaucer = withSirenEdge(state.saucer, updateSpawnDirector(stepSaucer(stepped, dt), dt))
 
   // The wave director spawns the next wave once the field is clear (play only).
   // It runs on the post-step state and clones the rng itself, so any spawn draws

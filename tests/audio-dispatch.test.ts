@@ -71,7 +71,8 @@ const EVENT_EFFECT: ReadonlyArray<{ event: GameEvent; effect: Effect }> = [
   { event: { type: 'heartbeat' }, effect: { kind: 'play', sound: 'heartbeat' } },
   { event: { type: 'thrust-start' }, effect: { kind: 'startLoop', sound: 'thrust' } },
   { event: { type: 'thrust-stop' }, effect: { kind: 'stopLoop', sound: 'thrust' } },
-  { event: { type: 'saucer-siren-start' }, effect: { kind: 'startLoop', sound: 'saucerSiren' } },
+  { event: { type: 'saucer-siren-start', size: 'large' }, effect: { kind: 'startLoop', sound: 'saucerSiren' } },
+  { event: { type: 'saucer-siren-start', size: 'small' }, effect: { kind: 'startLoop', sound: 'saucerSirenSmall' } },
   { event: { type: 'saucer-siren-stop' }, effect: { kind: 'stopLoop', sound: 'saucerSiren' } },
 ]
 
@@ -135,11 +136,21 @@ describe('audio-dispatch playEventSounds (Story A-18)', () => {
   it('starts and stops the saucer siren loop on its edges', async () => {
     const { playEventSounds } = await loadDispatch()
     const audio = recordingAudio()
-    playEventSounds(audio, [{ type: 'saucer-siren-start' }, { type: 'saucer-siren-stop' }])
+    playEventSounds(audio, [
+      { type: 'saucer-siren-start', size: 'large' },
+      { type: 'saucer-siren-stop' },
+    ])
     expect(audio.calls).toEqual([
       { kind: 'startLoop', sound: 'saucerSiren' },
       { kind: 'stopLoop', sound: 'saucerSiren' },
     ])
+  })
+
+  it('starts the SMALL siren for a small-saucer spawn', async () => {
+    const { playEventSounds } = await loadDispatch()
+    const audio = recordingAudio()
+    playEventSounds(audio, [{ type: 'saucer-siren-start', size: 'small' }])
+    expect(audio.calls).toEqual([{ kind: 'startLoop', sound: 'saucerSirenSmall' }])
   })
 
   it('wires every GameEvent type discriminant and every explosion source', () => {
