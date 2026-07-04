@@ -318,6 +318,14 @@ export function stepGame(state: GameState, input: Input, dt: number): GameState 
   // below), since a real explosion happened this frame either way.
   if (!state.shipDestroyed && shipDestroyed) {
     events.push({ type: 'explosion', source: 'ship' })
+    // A dead ship's engine goes silent (the intent behind the alive-gated thrust
+    // events above). But the thrust-stop falling edge can never fire once dead,
+    // so a ship that dies with thrust ENGAGED would leave its loop humming
+    // through gameover/attract. Stop it here iff the loop is on this frame —
+    // `input.thrust` covers both a held and a just-pressed thrust. A same-frame
+    // RELEASE is not `input.thrust`, so its (still-alive) falling-edge stop
+    // above is the only one — no double-stop.
+    if (input.thrust) events.push({ type: 'thrust-stop' })
   }
 
   let stepped: GameState = {

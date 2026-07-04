@@ -202,6 +202,53 @@ describe('thrust events', () => {
     const out = stepGame(playing(1, { shipDestroyed: true }), THRUST, DT)
     expect(eventsOfType(out, 'thrust-start')).toHaveLength(0)
   })
+
+  // Regression (Reviewer finding H-1): the falling-edge stop is gated on the
+  // ship being alive, so a ship that dies WHILE thrust is held can never emit
+  // it — leaving the engine loop humming through death → gameover → attract.
+  // The death edge must stop the loop instead.
+  it('emits thrust-stop when the ship dies while thrust is held', () => {
+    const s0 = playing(4242, {
+      ship: shipAt(CENTER),
+      rocks: [rockAt(CENTER, 'large')],
+      thrustPrev: true, // was thrusting last frame
+    })
+    const out = stepGame(s0, THRUST, DT) // still holding thrust as it dies
+    expect(out.shipDestroyed).toBe(true)
+    expect(eventsOfType(out, 'thrust-stop')).toHaveLength(1)
+  })
+
+  // Guards the fix against a double-stop: if thrust is RELEASED the same frame
+  // the ship dies, the (still-alive) falling edge already emits the one stop —
+  // the death edge must not add a second.
+  it('emits exactly one thrust-stop when thrust is released the frame the ship dies', () => {
+    const s0 = playing(4242, {
+      ship: shipAt(CENTER),
+      rocks: [rockAt(CENTER, 'large')],
+      thrustPrev: true,
+    })
+    const out = stepGame(s0, NO_INPUT, DT) // released thrust the same frame it dies
+    expect(out.shipDestroyed).toBe(true)
+    expect(eventsOfType(out, 'thrust-stop')).toHaveLength(1)
+  })
+
+  // The headline of H-1: holding thrust through a fatal death must not leave the
+  // loop running across gameover and into attract. Over a long window there is
+  // exactly ONE stop (the death frame) and no lingering hum.
+  it('stops the thrust loop exactly once through a fatal death into attract', () => {
+    let s = playing(4242, {
+      lives: 1,
+      ship: shipAt(CENTER),
+      rocks: [rockAt(CENTER, 'large')],
+      thrustPrev: true,
+    })
+    let stops = 0
+    for (let i = 0; i < 300; i++) {
+      s = stepGame(s, THRUST, DT) // keep holding thrust through death → gameover → attract
+      stops += eventsOfType(s, 'thrust-stop').length
+    }
+    expect(stops).toBe(1)
+  })
 })
 
 // --- saucer siren loop (AC-5) --------------------------------------------
