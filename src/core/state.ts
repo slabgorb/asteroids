@@ -30,6 +30,11 @@ export interface Ship {
   pos: Vec2
   vel: Vec2
   dir: number
+  /** A-14: false while a hyperspace jump is in flight (the ship is gone from the
+   * playfield during its reappearance window, GameState.shipSpawnTimer); true
+   * otherwise. A-15's respawn-invulnerability window keeps the ship visible, so
+   * only hyperspace sets this false. The renderer skips a hidden ship. */
+  visible: boolean
 }
 
 /** A rock's size tier — large rocks split into medium, medium into small. */
@@ -173,6 +178,11 @@ export interface GameState {
    * mirroring firePrev's precedent; the emitted thrust-start/stop EVENT is
    * separately gated on ship-alive in sim.ts. */
   thrustPrev: boolean
+  /** A-14: previous frame's hyperspace-button state — the same shift-register
+   * debounce as firePrev/thrustPrev/startPrev. Makes the jump EDGE-triggered: a
+   * held key fires one jump, not a fresh jump every tick once the reappearance
+   * window closes. */
+  hyperspacePrev: boolean
   /** A-18: seconds remaining before the next ambient heartbeat beat (play
    * only). `0` means "not counting" (boot, or just beat) — the same
    * arm-then-count convention as waveTransitionTimer/saucerSpawnTimer. Tempo
@@ -199,6 +209,8 @@ export function initialState(seed: number = DEFAULT_SEED): GameState {
       pos: { x: WORLD_W / 2, y: WORLD_H / 2 },
       vel: { x: 0, y: 0 },
       dir: 64,
+      // A boot ship is on the playfield; only a hyperspace jump hides it (A-14).
+      visible: true,
     },
     rocks: [],
     bullets: [],
@@ -225,6 +237,8 @@ export function initialState(seed: number = DEFAULT_SEED): GameState {
     highScoreTable: [],
     // Thrust not held at boot, so the very first press reads as a rising edge (A-18).
     thrustPrev: false,
+    // Hyperspace not held at boot, so the very first press reads as a rising edge (A-14).
+    hyperspacePrev: false,
     // `0` = not counting; the first playing tick arms it without beating, exactly
     // like saucerSpawnTimer's first-eligible-frame convention (A-18).
     heartbeatTimer: 0,

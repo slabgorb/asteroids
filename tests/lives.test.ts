@@ -117,7 +117,7 @@ function deadAwaiting(over: Partial<GameState> = {}): GameState {
   return playing(11, {
     shipDestroyed: true,
     lives: 2,
-    ship: { pos: { x: 1000, y: 900 }, vel: { x: 3, y: -2 }, dir: 100 },
+    ship: { pos: { x: 1000, y: 900 }, vel: { x: 3, y: -2 }, dir: 100, visible: true },
     shipSpawnTimer: 0,
     rocks: [rockAt(offCenter(2))],
     ...over,
@@ -148,7 +148,7 @@ describe('STARTING_LIVES — the ROM default (A-15 swaps the A-16 stub)', () => 
 describe('handleShipDeath — decrement with reserves, gameover on the last ship', () => {
   const ghostPos: Vec2 = { x: 1000, y: 900 }
   const withReserves = (): GameState =>
-    playing(7, { lives: 3, score: 500, ship: { pos: { ...ghostPos }, vel: { x: 0, y: 0 }, dir: 20 } })
+    playing(7, { lives: 3, score: 500, ship: { pos: { ...ghostPos }, vel: { x: 0, y: 0 }, dir: 20, visible: true } })
   const lastShip = (score = 500): GameState => playing(7, { lives: 1, score })
 
   it('with ships in reserve: decrements once, stays in play, leaves the ship dead where it fell', () => {
@@ -256,7 +256,7 @@ describe('tryRespawnShip — dead + reserves + clear center = revive; anything e
   it('revives at the exact center, at rest, nose-up, with the invulnerability window armed', () => {
     const out = tryRespawnShip(deadAwaiting())
     expect(out.shipDestroyed).toBe(false)
-    expect(out.ship).toEqual({ pos: { ...CENTER }, vel: { x: 0, y: 0 }, dir: 64 })
+    expect(out.ship).toEqual({ pos: { ...CENTER }, vel: { x: 0, y: 0 }, dir: 64, visible: true })
     expect(out.lives).toBe(2) // respawn consumes no ship — death already did
     expect(out.shipSpawnTimer).toBe(RESPAWN_INVULNERABILITY_S)
     expect(isInvulnerable(out)).toBe(true)
@@ -274,7 +274,7 @@ describe('tryRespawnShip — dead + reserves + clear center = revive; anything e
 
   it('never touches a live ship (no teleport-to-center on a no-op tick)', () => {
     const alive = playing(9, {
-      ship: { pos: { x: 2000, y: 2500 }, vel: { x: 4, y: 0 }, dir: 30 },
+      ship: { pos: { x: 2000, y: 2500 }, vel: { x: 4, y: 0 }, dir: 30, visible: true },
       rocks: [rockAt(offCenter(2))],
     })
     expect(tryRespawnShip(alive)).toEqual(alive)

@@ -185,7 +185,7 @@ describe('stepGame — small-rock collision despawns cleanly (AC-3)', () => {
 })
 
 describe('stepGame — ship-vs-rock collision destroys the ship (AC-4)', () => {
-  const shipAt = (pos: Vec2): GameState['ship'] => ({ pos: { ...pos }, vel: { x: 0, y: 0 }, dir: 64 })
+  const shipAt = (pos: Vec2): GameState['ship'] => ({ pos: { ...pos }, vel: { x: 0, y: 0 }, dir: 64, visible: true })
 
   it('a fresh game starts with a live ship (shipDestroyed === false)', () => {
     expect(initialState(1).shipDestroyed).toBe(false)
@@ -300,7 +300,7 @@ describe('collision hardening — kills A-8 mutation-weak survivors (A-9 carry-f
   // A-8's suite let three mutations survive (session Delivery Findings). A-9
   // builds scoring directly on this loop, so these guards lock the loop down
   // first. All are GREEN against the shipped A-8 code — pure regression guards.
-  const shipAt = (pos: Vec2): GameState['ship'] => ({ pos: { ...pos }, vel: { x: 0, y: 0 }, dir: 64 })
+  const shipAt = (pos: Vec2): GameState['ship'] => ({ pos: { ...pos }, vel: { x: 0, y: 0 }, dir: 64, visible: true })
 
   // Mutation A — collapse `overlaps` to one axis (|dx|<extent only): every
   // existing bullet-vs-rock test offsets along X (dy=0), so an x-only predicate

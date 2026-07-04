@@ -113,6 +113,9 @@ export function stepShip(ship: Ship, input: Input, dt: number): Ship {
   vy = clampAxis(vy)
 
   return {
+    // Spread the incoming ship so non-physics fields (A-14's `visible`) carry
+    // through; the physics keys below override. Visibility is owned by sim.ts.
+    ...ship,
     pos: wrapPosition(
       { x: ship.pos.x + vx * frames, y: ship.pos.y + vy * frames },
       WORLD_BOUNDS,

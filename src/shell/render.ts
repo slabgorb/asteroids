@@ -397,7 +397,10 @@ export function render(
   for (const rock of state.rocks) drawRock(ctx, rock, view)
   if (state.saucer) drawSaucer(ctx, state.saucer, view)
   for (const bullet of state.bullets) drawBullet(ctx, bullet, view)
-  if (state.mode !== 'attract' && !state.shipDestroyed) {
+  // A-14: `ship.visible` is false while a hyperspace jump is in flight — the ship
+  // (and its flame) vanish for the reappearance window, then pop back at the new
+  // spot. Skipping the draw here is the whole visual of a hyperspace jump.
+  if (state.mode !== 'attract' && !state.shipDestroyed && state.ship.visible) {
     drawShip(ctx, state.ship, view)
     if (input.thrust) drawFlame(ctx, state.ship, view)
   }
