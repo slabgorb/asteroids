@@ -75,11 +75,20 @@ export interface Saucer {
 /** Run lifecycle: the cabinet idles on attract, plays a run, then game-over. */
 export type Mode = 'attract' | 'playing' | 'gameover'
 
-/** Ships dealt out on a start press (A-16). STUB — one play per attract cycle,
- * because no respawn exists yet: a multi-life count would soft-lock on the first
- * death. A-15 (lives/safe-respawn/invulnerability) swaps in the ROM value.
- * verify vs quarry (A-15). */
-export const STARTING_LIVES = 1
+/** Ships dealt out on a start press. The ROM default is 3 (init $6ED8,
+ * "Assume A 3 Ship Game"); a DIP switch at $2802 (CentCMShipsSw) selects a
+ * 4-ship game instead — this free-play cabinet has no settings UI, so the
+ * value is fixed at 3 rather than configurable. A-15 landed the lives model
+ * that spends these (decrement + clear-center respawn + invulnerability —
+ * core/lives.ts). */
+export const STARTING_LIVES = 3
+
+/** Seconds the non-qualifying GAME OVER card is displayed before the cabinet
+ * returns to attract on its own. Provisional feel value — the ROM's exact
+ * attract-page timings are A-17's quarry. verify vs quarry (A-17). Lives here
+ * (not sim.ts) so core/lives.ts can initialise the gameover phase without a
+ * sim <-> lives import cycle; sim.ts re-exports it. */
+export const GAME_OVER_DISPLAY_S = 3
 
 /** The game-over phase, nested under GameState (A-16) — A-2's Mode union is NOT
  * extended for "entering initials"; that sub-state lives here instead. `null`
@@ -116,11 +125,17 @@ export interface GameState {
    * firing edge-triggered (A-4, ShipBulletSR $63): a shot spawns only on a fresh
    * low→high press, so holding fire does not auto-fire. */
   firePrev: boolean
-  /** A-8: latched true once the ship is destroyed by a rock collision. Sticky —
-   * a dead ship is out of the collision-active set until A-15 (respawn/invuln)
-   * clears it. `ship` stays non-null (a single-ship model, not a list), so this
-   * flag is the "removed from the active list" signal. */
+  /** A-8: latched true once the ship is destroyed by a rock collision. Sticky
+   * while dead: a dead ship is out of the collision-active set, deaf to input,
+   * and gun-silent until A-15's tryRespawnShip revives it at a clear center
+   * (or the run ends). `ship` stays non-null (a single-ship model, not a
+   * list), so this flag is the "removed from the active list" signal. */
   shipDestroyed: boolean
+  /** A-15: seconds of post-respawn invulnerability remaining — while nonzero
+   * the ship cannot be hit (the ROM spawn timer at $02FA; armed to
+   * RESPAWN_INVULNERABILITY_S by tryRespawnShip, decays by dt, clamped at 0).
+   * A-14 (hyperspace) will reuse this field with its own $30 window. */
+  shipSpawnTimer: number
   /** A-10: seconds remaining before the wave director spawns the next wave.
    * `0` means "not counting" (boot, or a wave in progress). The director arms it
    * to `WAVE_DELAY_S` the first tick it finds the field clear, counts it down each
@@ -169,6 +184,9 @@ export function initialState(seed: number = DEFAULT_SEED): GameState {
     firePrev: false,
     // Ship starts alive; a rock collision (A-8) latches this true.
     shipDestroyed: false,
+    // Boot ship is dealt alive and mortal — the invulnerability window arms
+    // only on a respawn (A-15).
+    shipSpawnTimer: 0,
     // `0` = not counting; once play begins the wave director arms this and counts
     // it down, spawning wave 1 after WAVE_DELAY_S via the same path as every later
     // transition (no special first-spawn branch) (A-10).
