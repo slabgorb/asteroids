@@ -24,10 +24,14 @@ const STORAGE_KEY = 'asteroids-high-scores'
 function isHighScoreEntry(value: unknown): value is HighScoreEntry {
   if (typeof value !== 'object' || value === null) return false
   const entry = value as Record<string, unknown>
+  // Number.isFinite (false for any non-number AND for ±Infinity/NaN): a
+  // poisoned `1e999` row would otherwise render "Infinity" on the HUD and
+  // permanently win the qualify boundary. The lobby's scoreOf demands finite
+  // scores for these same rows — the game's guard holds the same line.
   return (
     typeof entry.name === 'string' &&
-    typeof entry.score === 'number' &&
-    typeof entry.wave === 'number'
+    Number.isFinite(entry.score) &&
+    Number.isFinite(entry.wave)
   )
 }
 

@@ -30,7 +30,7 @@ export type HighScoreTable = HighScoreEntry[]
 // qualifies. While the board has open slots, any positive score makes it; once
 // full, the score must STRICTLY beat the lowest entry to displace it (a tie does
 // not).
-export function qualifiesForHighScore(table: HighScoreTable, score: number): boolean {
+export function qualifiesForHighScore(table: readonly HighScoreEntry[], score: number): boolean {
   if (score <= 0) return false
   if (table.length < MAX_HIGH_SCORES) return true
   const lowest = table[table.length - 1].score
@@ -40,7 +40,10 @@ export function qualifiesForHighScore(table: HighScoreTable, score: number): boo
 // Returns a NEW table with `entry` inserted in descending-score order, truncated
 // to MAX_HIGH_SCORES. Ties place the new entry AFTER existing equal-score entries
 // (existing holders keep the higher rank). The input table is not mutated.
-export function insertHighScore(table: HighScoreTable, entry: HighScoreEntry): HighScoreTable {
+export function insertHighScore(
+  table: readonly HighScoreEntry[],
+  entry: HighScoreEntry,
+): HighScoreTable {
   const out = table.slice()
   let i = out.length
   for (let k = 0; k < out.length; k++) {

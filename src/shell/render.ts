@@ -48,7 +48,9 @@ const BANNER_FONT = "900 48px 'Vector Battle', 'Orbitron', monospace"
 const ATTRACT_CYCLE_TICKS = 240
 
 // Life-icon geometry, screen px: a mini nose-up ship per reserve ship, in a row
-// under the score readout.
+// under the score readout. Provisional feel values — the glyph becomes the
+// ROM-exact ship shape in A-17 and size/glow are calibrated in A-19.
+// verify vs quarry (A-17).
 const LIFE_ICON_H = 18
 const LIFE_ICON_W = 12
 const LIFE_ICON_GAP = 8

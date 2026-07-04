@@ -183,24 +183,27 @@ export function stepGame(state: GameState, input: Input, dt: number): GameState 
     shipDestroyed = rocks.some((r) => overlaps(ship.pos, r.pos, SHIP_HITBOX + ROCK_HITBOX[r.size]))
   }
 
-  // A-16's stub of the A-15 death seam: on the destruction EDGE (not the sticky
-  // latch), spend a ship; with none left, enter 'gameover' in this same step,
-  // deciding the qualifying path off the persisted board. The `lives > 0` guard
-  // keeps legacy lives-0 free-play states (every pre-A-16 fixture) latching the
-  // old sticky flag without a mode change. A-15 replaces the no-respawn part —
-  // decrement + safe-respawn while ships remain — keeping this lives-0 edge.
+  // A-16's terminal-death stub of the A-15 seam: on the destruction EDGE (not
+  // the sticky latch), the run ENDS — enter 'gameover' this same step with all
+  // reserves forfeit (lives -> 0), deciding the qualifying path off the
+  // persisted board. Reserves must not keep the run alive: with no respawn
+  // until A-15, a decrement-and-continue branch strands an invisible immortal
+  // ship and makes the high-score board unreachable for exactly the bonus-ship
+  // runs that qualify (review round 1, [HIGH]). Bonus ships are display-only
+  // until A-15 replaces this branch with decrement + safe-respawn while ships
+  // remain, keeping the "destroyed with none left -> gameover" edge. The
+  // `lives > 0` guard keeps legacy lives-0 free-play states (every pre-A-16
+  // fixture) latching the old sticky flag without a mode change.
   let mode: Mode = state.mode
   let gameOver: GameOverPhase | null = state.gameOver
   if (!state.shipDestroyed && shipDestroyed && lives > 0) {
-    lives -= 1
-    if (lives === 0) {
-      mode = 'gameover'
-      gameOver = {
-        qualifies: qualifiesForHighScore(state.highScoreTable, score),
-        initials: '',
-        confirmed: false,
-        displayTimer: GAME_OVER_DISPLAY_S,
-      }
+    lives = 0
+    mode = 'gameover'
+    gameOver = {
+      qualifies: qualifiesForHighScore(state.highScoreTable, score),
+      initials: '',
+      confirmed: false,
+      displayTimer: GAME_OVER_DISPLAY_S,
     }
   }
 
