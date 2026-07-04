@@ -1,11 +1,15 @@
 // src/core/saucer.ts
 //
-// A-11: the LARGE SAUCER — a countdown-spawned enemy that crosses the field
-// horizontally, weaves with periodic vertical course changes, and fires at
-// RANDOM headings on a cadence. Foundation for A-12 (small saucer + aimed fire)
-// and A-13 (scoring/collision/siren): the spawn director, movement, and bullet
-// plumbing here are reused; A-12 only swaps in a second size and replaces the
-// random heading with an aimed one.
+// A-11 + A-12: the FLYING SAUCER — a countdown-spawned enemy that crosses the
+// field horizontally, weaves with periodic vertical course changes, and fires on
+// a cadence. Two variants share all of that plumbing (A-11) and differ only in
+// spawn selection and fire:
+//   * LARGE (A-11): fires at RANDOM headings; the only variant early in the game.
+//   * SMALL (A-12): the spawn director selects it more often as the score climbs;
+//     it AIMS at the ship, with a random error that ramps to zero (dead-on) once
+//     the score reaches SAUCER_AIM_PERFECT_SCORE (35000).
+// A-13 (scoring/collision/siren) reads Saucer.size; the spawn director, movement,
+// and bullet plumbing are otherwise reused verbatim.
 //
 // Determinism: no wall-clock, no Math.random — all randomness flows through the
 // passed Rng, which advances IN PLACE (like spawnWave / splitRock). Callers
@@ -19,7 +23,7 @@
 // magnitude below is PROVISIONAL and named/isolated so A-17's quarry port is a
 // constant swap, not a refactor — each carries a `verify vs quarry (A-17)` note.
 
-import type { GameState, Saucer, Bullet } from './state'
+import type { GameState, Saucer, Bullet, Vec2, SaucerSize } from './state'
 import { WORLD_W, WORLD_H } from './state'
 import { nextFloat, nextInt, type Rng } from './rng'
 
@@ -60,6 +64,31 @@ export const SAUCER_BULLET_LIFETIME = 18
  * (single-source). verify vs quarry (A-17). */
 export const SAUCER_BULLET_SPEED = 111
 
+// --- A-12: the small saucer (aimed fire + accuracy ramp) ------------------
+
+/** Score at/above which the SMALL saucer's aim is dead-on (zero error). This is
+ * the number in the story title ("accuracy ramp after 35000 pts") — the spec,
+ * not a ROM guess. verify the exact ROM threshold vs quarry (A-17). */
+export const SAUCER_AIM_PERFECT_SCORE = 35000
+
+/** Half-width (radians) of the small saucer's aim-error cone at score 0 — its
+ * widest scatter, shrinking linearly to zero at SAUCER_AIM_PERFECT_SCORE. A
+ * quarter-turn-ish cone keeps even the earliest small saucer recognisably aimed
+ * (unlike the large saucer's full-circle spray). Provisional feel value.
+ * verify vs quarry (A-17). */
+export const SAUCER_AIM_ERROR_MAX = Math.PI / 5
+
+/** Score at/above which the spawn director MAY produce a small saucer; below it,
+ * only large saucers spawn — keeping the early game (and A-11's score-0 suite)
+ * large-only. Provisional. verify vs quarry (A-17). */
+export const SAUCER_SMALL_MIN_SCORE = 10000
+
+/** Score at/above which ONLY small saucers spawn. Between SAUCER_SMALL_MIN_SCORE
+ * and here the small-saucer probability rises linearly with the score (canon puts
+ * small-only around 40000). Local — no test pins the exact schedule, only the
+ * brackets (large-only at 0, small present when high). verify vs quarry (A-17). */
+const SAUCER_SMALL_ONLY_SCORE = 40000
+
 /** How much the spawn reload shrinks per wave, toward the floor. The shrink
  * TRIGGER is unconfirmed (asteroid-count threshold vs frame counter — the two
  * sources conflict); modelled as a deterministic per-wave step. verify vs
@@ -80,26 +109,61 @@ function wrap(v: number, size: number): number {
   return ((v % size) + size) % size
 }
 
-/** Spawn a large saucer entering from a random left/right edge, crossing INTO
- * the field (velocity sign matches the entry edge), at a random height. Consumes
- * (advances) the passed rng. */
-function spawnSaucer(rng: Rng): Saucer {
+/** Probability that a spawn at this score is the SMALL variant: zero below
+ * SAUCER_SMALL_MIN_SCORE (large-only early game), rising linearly to one at
+ * SAUCER_SMALL_ONLY_SCORE (small-only late game). */
+function smallProbability(score: number): number {
+  if (score < SAUCER_SMALL_MIN_SCORE) return 0
+  if (score >= SAUCER_SMALL_ONLY_SCORE) return 1
+  return (score - SAUCER_SMALL_MIN_SCORE) / (SAUCER_SMALL_ONLY_SCORE - SAUCER_SMALL_MIN_SCORE)
+}
+
+/** Pick the saucer size for a spawn at this score. Below the small-saucer floor
+ * this returns 'large' WITHOUT consuming rng, so the early game's spawn stream
+ * (and A-11's score-0 tests) stay byte-for-byte unchanged; only once small
+ * saucers are possible does it draw. Consumes rng only when score >= the floor. */
+function pickSize(rng: Rng, score: number): SaucerSize {
+  if (score < SAUCER_SMALL_MIN_SCORE) return 'large'
+  return nextFloat(rng) < smallProbability(score) ? 'small' : 'large'
+}
+
+/** Spawn a saucer entering from a random left/right edge, crossing INTO the field
+ * (velocity sign matches the entry edge), at a random height. Its size is chosen
+ * by score (pickSize): large-only early, small increasingly likely as play
+ * deepens. Consumes (advances) the passed rng. */
+function spawnSaucer(rng: Rng, score: number): Saucer {
   const fromLeft = nextInt(rng, 2) === 0
   const y = nextFloat(rng) * WORLD_H
+  const size = pickSize(rng, score)
   return {
     pos: { x: fromLeft ? 0 : WORLD_W, y },
     velocity: { x: fromLeft ? SAUCER_SPEED : -SAUCER_SPEED, y: 0 },
+    size,
     courseTimer: SAUCER_COURSE_CHANGE_INTERVAL,
     fireTimer: SAUCER_FIRE_INTERVAL,
   }
 }
 
-/** A saucer shot at a RANDOM heading (the large saucer never aims — the A-12
- * differentiator). Consumes (advances) the passed rng. */
-function fireShot(pos: { x: number; y: number }, rng: Rng): Bullet {
-  const heading = nextFloat(rng) * 2 * Math.PI
+/** The small saucer's AIMED heading: the bearing to the ship plus a symmetric
+ * random error whose half-width shrinks linearly from SAUCER_AIM_ERROR_MAX at
+ * score 0 to zero at SAUCER_AIM_PERFECT_SCORE (dead-on at/after 35000). Consumes
+ * (advances) the passed rng. */
+function aimHeading(from: Vec2, shipPos: Vec2, score: number, rng: Rng): number {
+  const bearing = Math.atan2(shipPos.y - from.y, shipPos.x - from.x)
+  const ramp = Math.max(0, 1 - score / SAUCER_AIM_PERFECT_SCORE)
+  const error = (nextFloat(rng) * 2 - 1) * SAUCER_AIM_ERROR_MAX * ramp
+  return bearing + error
+}
+
+/** A saucer shot. A LARGE saucer fires at a RANDOM heading (never aims); a SMALL
+ * saucer AIMS at the ship via aimHeading (the A-12 differentiator). Either way
+ * exactly one rng draw is consumed, so the large-saucer stream is unchanged from
+ * A-11. Consumes (advances) the passed rng. */
+function fireShot(from: Vec2, size: SaucerSize, shipPos: Vec2, score: number, rng: Rng): Bullet {
+  const heading =
+    size === 'small' ? aimHeading(from, shipPos, score, rng) : nextFloat(rng) * 2 * Math.PI
   return {
-    pos: { x: pos.x, y: pos.y },
+    pos: { x: from.x, y: from.y },
     vel: { x: Math.cos(heading) * SAUCER_BULLET_SPEED, y: Math.sin(heading) * SAUCER_BULLET_SPEED },
     life: SAUCER_BULLET_LIFETIME,
     owner: 'saucer',
@@ -127,7 +191,7 @@ export function updateSpawnDirector(state: GameState, dt: number): GameState {
     return { ...state, saucerSpawnTimer: remaining }
   }
   const rng: Rng = { seed: state.rng.seed }
-  const saucer = spawnSaucer(rng)
+  const saucer = spawnSaucer(rng, state.score)
   return { ...state, rng, saucer, saucerSpawnTimer: spawnReload(state.wave) }
 }
 
@@ -171,10 +235,10 @@ export function stepSaucer(state: GameState, dt: number): GameState {
     fireTimer += SAUCER_FIRE_INTERVAL // carry the remainder — keep the fire cadence drift-free
     const liveSaucerShots = bullets.reduce((n, b) => (b.owner === 'saucer' ? n + 1 : n), 0)
     if (liveSaucerShots < SAUCER_MAX_BULLETS) {
-      bullets = [...bullets, fireShot({ x, y }, rng)]
+      bullets = [...bullets, fireShot({ x, y }, saucer.size, state.ship.pos, state.score, rng)]
     }
   }
 
-  const moved: Saucer = { pos: { x, y }, velocity, courseTimer, fireTimer }
+  const moved: Saucer = { pos: { x, y }, velocity, size: saucer.size, courseTimer, fireTimer }
   return { ...state, rng, saucer: moved, bullets }
 }

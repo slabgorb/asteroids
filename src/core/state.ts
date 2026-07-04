@@ -60,14 +60,21 @@ export interface Bullet {
   owner: 'player' | 'saucer'
 }
 
-/** The flying-saucer enemy (A-11: the large variant). `velocity` is world-units
- * per 60 Hz frame — a constant horizontal crossing speed plus a vertical
- * component rerolled on the course cadence. `courseTimer`/`fireTimer` are the
- * per-saucer countdowns (seconds) to the next vertical-course reroll and the
- * next shot. A-12 adds a `size` discriminant; this story is large-only. */
+/** A saucer's size tier. The LARGE variant (A-11) crosses and fires at random
+ * headings; the SMALL variant (A-12) aims at the ship with an accuracy that
+ * ramps up with the score. A-13 scores the two differently (200 vs 990/1000)
+ * and drives the siren pitch from which one is alive. */
+export type SaucerSize = 'large' | 'small'
+
+/** The flying-saucer enemy. `velocity` is world-units per 60 Hz frame — a
+ * constant horizontal crossing speed plus a vertical component rerolled on the
+ * course cadence. `size` is fixed at spawn (A-12): 'large' sprays random shots,
+ * 'small' aims at the ship. `courseTimer`/`fireTimer` are the per-saucer
+ * countdowns (seconds) to the next vertical-course reroll and the next shot. */
 export interface Saucer {
   pos: Vec2
   velocity: Vec2
+  size: SaucerSize
   courseTimer: number
   fireTimer: number
 }
