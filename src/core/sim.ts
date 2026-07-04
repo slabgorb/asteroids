@@ -18,8 +18,8 @@ import { stepShip, SHIP_HITBOX } from './ship'
 import { stepBullets } from './bullet'
 import { updateRocks, splitRock, ROCK_HITBOX } from './rocks'
 import { updateWaveDirector } from './waves'
-import { updateSpawnDirector, stepSaucer } from './saucer'
-import { applyScore } from './score'
+import { updateSpawnDirector, stepSaucer, SAUCER_HITBOX, SAUCER_ROCK_COLLISION_ENABLED } from './saucer'
+import { applyScore, addScore, SAUCER_SCORE } from './score'
 import { insertHighScore } from './highscore'
 import { handleShipDeath, tryRespawnShip } from './lives'
 import { wrappedDelta, type Bounds } from './bounds'
@@ -192,66 +192,101 @@ export function stepGame(state: GameState, input: Input, dt: number): GameState 
 
   let rocks = updateRocks(state.rocks, dt, WORLD_BOUNDS)
   let liveBullets: Bullet[] = bullets
-  let shipDestroyed = state.shipDestroyed
   let score = state.score
   let lives = state.lives
+  let saucer = state.saucer
+
+  // The invulnerability window (A-15) decays by sim time FIRST, clamped at zero,
+  // so its final tick still shields (checking pre-decay would stretch the window
+  // a tick; float residue from repeated dt subtraction would stretch it further).
+  // Decayed BEFORE the collision checks because A-13's new ship hazards (saucer
+  // contact, saucer shot) consult the same gate as ship-vs-rock: a ship that is
+  // invulnerable OR already dead is out of the collision-active set entirely.
+  const shipSpawnTimer = Math.max(0, state.shipSpawnTimer - dt)
+  const shipHittable = !state.shipDestroyed && shipSpawnTimer <= 0
 
   // Collision + destruction runs on the post-move positions. (Attract and
-  // gameover take the early branches above, so this path IS play mode.)
-  //
-  // Bullet-vs-rock: a shot destroys the FIRST rock it overlaps (one shot, one
-  // rock) and is consumed. A large/medium rock becomes splitRock's children;
-  // a small rock despawns to nothing (drawing no rng). splitRock mutates `rng`
-  // — this step's own clone of state.rng — so the advanced seed is threaded
-  // forward in the returned state, keeping the replay deterministic.
-  // The per-frame travel scalar (dt*60 = 1 at 60 Hz) — the SAME unit bullet.ts and
-  // rocks.ts integrate by. The swept hit-test reconstructs each shot's pre-move
-  // position from this so a fast shot can't tunnel a small rock (see sweptOverlaps).
+  // gameover take the early branches above, so this path IS play mode.) The
+  // per-frame travel scalar (dt*60 = 1 at 60 Hz) — the SAME unit bullet.ts and
+  // rocks.ts integrate by — feeds the SWEPT hit-test, which reconstructs each
+  // shot's pre-move position so a fast shot can't tunnel a small target (see
+  // sweptOverlaps). Both bullet↔saucer and saucer-bullet↔ship fly at 111
+  // lo-units/frame, so both use the swept test, exactly as bullet↔rock does.
   const frames = dt * 60
+
+  // One pass over every shot. A PLAYER shot destroys the FIRST rock it sweeps
+  // (score its tier, then splitRock — a large/medium rock becomes children, a
+  // small one despawns), else the saucer if it sweeps that (score by size via
+  // A-9's addScore, remove the saucer); either way the shot is consumed. A
+  // SAUCER shot destroys a hittable ship it sweeps and is consumed. Misses
+  // survive. splitRock mutates this step's rng clone, threading the seed forward.
   const working: Rock[] = [...rocks]
   const survivors: Bullet[] = []
+  let shipHitBySaucerShot = false
   for (const bullet of liveBullets) {
-    // Only PLAYER shots destroy rocks; saucer shots (A-11) pass through — their
-    // collisions (saucer-bullet vs ship, etc.) are A-13, not this story.
-    if (bullet.owner !== 'player') {
-      survivors.push(bullet)
-      continue
-    }
-    const hit = working.findIndex((r) =>
-      sweptOverlaps(bullet.pos, bullet.vel, r.pos, ROCK_HITBOX[r.size], frames),
-    )
-    if (hit === -1) {
+    if (bullet.owner === 'player') {
+      const hit = working.findIndex((r) =>
+        sweptOverlaps(bullet.pos, bullet.vel, r.pos, ROCK_HITBOX[r.size], frames),
+      )
+      if (hit !== -1) {
+        const destroyed = working[hit]
+        const awarded = applyScore(score, lives, destroyed.size)
+        score = awarded.score
+        lives = awarded.lives
+        working.splice(hit, 1, ...splitRock(destroyed, rng))
+        continue // shot consumed by the rock
+      }
+      // No rock hit — a player shot may instead kill the saucer. Scored by size
+      // via addScore (the SAME rollover + bonus-ship path as rocks; 200/1000 come
+      // from A-9's canonical SAUCER_SCORE, not a literal here).
+      if (
+        saucer !== null &&
+        sweptOverlaps(bullet.pos, bullet.vel, saucer.pos, SAUCER_HITBOX[saucer.size], frames)
+      ) {
+        const awarded = addScore(score, lives, SAUCER_SCORE[saucer.size])
+        score = awarded.score
+        lives = awarded.lives
+        saucer = null // saucer destroyed by the shot
+        continue // shot consumed
+      }
       survivors.push(bullet)
     } else {
-      // A-9: score the destroyed rock's OWN tier (children are scored only
-      // when they are later shot), then split it. applyScore also grants a
-      // bonus ship for every 10000-point boundary this award crosses. A child
-      // spawned this frame that a later bullet hits is a real, separate
-      // destruction and scores its own tier — no rock is ever counted twice.
-      const destroyed = working[hit]
-      const awarded = applyScore(score, lives, destroyed.size)
-      score = awarded.score
-      lives = awarded.lives
-      working.splice(hit, 1, ...splitRock(destroyed, rng))
+      // A saucer shot: destroys a hittable ship it sweeps (a path distinct from
+      // direct saucer↔ship contact — different originating entity), else flies on.
+      if (shipHittable && sweptOverlaps(bullet.pos, bullet.vel, ship.pos, SHIP_HITBOX, frames)) {
+        shipHitBySaucerShot = true
+        continue // shot consumed on the kill
+      }
+      survivors.push(bullet)
     }
   }
   rocks = working
   liveBullets = survivors
 
-  // The invulnerability window (A-15) decays by sim time FIRST, clamped at
-  // zero, so its final tick still shields — the collision check consults the
-  // decayed value (checking pre-decay would stretch the window a tick, and
-  // float residue from repeated dt subtraction would stretch it further). A
-  // dead ship's timer is already zero; it re-arms only on respawn.
-  const shipSpawnTimer = Math.max(0, state.shipSpawnTimer - dt)
+  // Ship destruction (all gated by shipHittable, so invulnerability shields
+  // against every hazard): ramming a rock, DIRECT contact with the saucer
+  // (mutual — the saucer dies too), or a saucer shot. Rocks/saucer-on-ram are
+  // otherwise unaffected. Sticky once latched; revived only by tryRespawnShip.
+  let shipDestroyed = state.shipDestroyed
+  if (shipHittable) {
+    const rammedRock = rocks.some((r) => overlaps(ship.pos, r.pos, SHIP_HITBOX + ROCK_HITBOX[r.size]))
+    const sc = saucer
+    const rammedSaucer = sc !== null && overlaps(ship.pos, sc.pos, SHIP_HITBOX + SAUCER_HITBOX[sc.size])
+    if (rammedRock || rammedSaucer || shipHitBySaucerShot) {
+      shipDestroyed = true
+      if (rammedSaucer) saucer = null // mutual destruction
+    }
+  }
 
-  // Ship-vs-rock: overlapping any rock destroys the ship — unless the post-
-  // respawn invulnerability window is still open (nonzero timer = unhittable,
-  // the isInvulnerable contract). Rocks are unaffected — ramming does not
-  // split them (that is a bullet's job). Sticky: once true it stays true
-  // until tryRespawnShip revives the ship at a clear center.
-  if (!shipDestroyed && shipSpawnTimer <= 0) {
-    shipDestroyed = rocks.some((r) => overlaps(ship.pos, r.pos, SHIP_HITBOX + ROCK_HITBOX[r.size]))
+  // Saucer↔rock (flag-gated, A-13): the saucer is destroyed on contact with any
+  // rock; the rock is unaffected (the minimal interpretation — verify vs quarry
+  // A-17). A saucer already killed above (by a shot or ship contact) is null here.
+  const scForRock = saucer
+  if (SAUCER_ROCK_COLLISION_ENABLED && scForRock !== null) {
+    const rammedByRock = rocks.some((r) =>
+      overlaps(scForRock.pos, r.pos, SAUCER_HITBOX[scForRock.size] + ROCK_HITBOX[r.size]),
+    )
+    if (rammedByRock) saucer = null
   }
 
   let stepped: GameState = {
@@ -261,6 +296,7 @@ export function stepGame(state: GameState, input: Input, dt: number): GameState 
     ship,
     rocks,
     bullets: liveBullets,
+    saucer,
     score,
     lives,
     firePrev,

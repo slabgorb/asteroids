@@ -64,6 +64,27 @@ export const SAUCER_BULLET_LIFETIME = 18
  * (single-source). verify vs quarry (A-17). */
 export const SAUCER_BULLET_SPEED = 111
 
+// --- A-13: collision extents + saucer↔rock flag ---------------------------
+
+/** Collision half-extent per saucer size, world lo-units (an AABB half-width,
+ * the same convention as ROCK_HITBOX/SHIP_HITBOX). The SMALL saucer is a
+ * genuinely tiny target: its window (2×42 = 84) is narrower than a player shot's
+ * 111-lo-unit-per-frame travel, so a fast shot can tunnel it — which is why
+ * bullet↔saucer uses the SWEPT path test (sim.ts sweptOverlaps), exactly as
+ * bullet↔rock does for small rocks. The LARGE saucer is a bigger, ship-sized
+ * target. Provisional feel values; verify vs quarry (A-17). */
+export const SAUCER_HITBOX: Readonly<Record<SaucerSize, number>> = {
+  large: 90,
+  small: 42,
+}
+
+/** Whether a saucer is destroyed on contact with a rock (A-13). Secondary
+ * sources + this story's brief assert it, but NEITHER fetched primary-source
+ * disassembly excerpt found the routine — a direct conflict. Shipped ON behind
+ * this named flag (minimal interpretation: the saucer dies, the rock is
+ * unaffected); verify vs quarry (A-17) before treating as settled. */
+export const SAUCER_ROCK_COLLISION_ENABLED = true
+
 // --- A-12: the small saucer (aimed fire + accuracy ramp) ------------------
 
 /** Score at/above which the SMALL saucer's aim is dead-on (zero error). This is
@@ -241,4 +262,14 @@ export function stepSaucer(state: GameState, dt: number): GameState {
 
   const moved: Saucer = { pos: { x, y }, velocity, size: saucer.size, courseTimer, fireTimer }
   return { ...state, rng, saucer: moved, bullets }
+}
+
+/** The siren state hook for A-18 (A-13): "which saucer is alive right now", as a
+ * pure derived value — 'large' or 'small' while that variant is on screen, else
+ * null. The real Asteroids siren shifts pitch by which saucer is present; A-18
+ * owns all sound synthesis and drives it off this. Deliberately trivial and
+ * timer-free: no audio, no wall-clock, just a read of state.saucer, so it stays
+ * inside the deterministic core-purity boundary. */
+export function sirenState(state: GameState): SaucerSize | null {
+  return state.saucer === null ? null : state.saucer.size
 }
