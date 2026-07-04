@@ -80,6 +80,10 @@ function advance(bullets: readonly Bullet[], frames: number): Bullet[] {
 export interface FireStep {
   bullets: Bullet[]
   firePrev: boolean
+  /** A-18: true iff a fresh player shot spawned THIS frame — the audio-event
+   * signal. Exposed so callers never have to infer it by diffing bullet-array
+   * length (which also shrinks on expiry the same frame). */
+  fired: boolean
 }
 
 /** Step firing for one frame. `ship` is the post-flight ship for this frame —
@@ -104,7 +108,8 @@ export function stepBullets(
   // each other out.
   const risingEdge = input.fire && !firePrev
   const playerShots = next.reduce((n, b) => (b.owner === 'player' ? n + 1 : n), 0)
-  if (risingEdge && playerShots < MAX_PLAYER_SHOTS) {
+  const fired = risingEdge && playerShots < MAX_PLAYER_SHOTS
+  if (fired) {
     next.push({
       pos: { x: ship.pos.x, y: ship.pos.y },
       vel: {
@@ -116,5 +121,5 @@ export function stepBullets(
     })
   }
 
-  return { bullets: next, firePrev: input.fire }
+  return { bullets: next, firePrev: input.fire, fired }
 }
