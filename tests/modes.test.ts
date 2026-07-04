@@ -32,7 +32,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { stepGame } from '../src/core/sim'
-import { initialState, WORLD_W, WORLD_H, type GameState, type Ship } from '../src/core/state'
+import { initialState, WORLD_W, WORLD_H, type GameState } from '../src/core/state'
 import { NO_INPUT, type Input } from '../src/core/input'
 import { spawnRocks, updateRocks } from '../src/core/rocks'
 import { createRng, nextFloat } from '../src/core/rng'
