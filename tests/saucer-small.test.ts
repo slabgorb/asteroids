@@ -45,6 +45,7 @@ import {
   WORLD_H,
   type GameState,
   type Saucer,
+  type SaucerSize,
   type Bullet,
   type Vec2,
 } from '../src/core/state'
@@ -236,31 +237,57 @@ describe('Saucer.size discriminant & score-driven spawn selection (AC)', () => {
     expect(sizes.has('small')).toBe(true)
   })
 
-  it('fixes a saucer size at spawn — it never changes while the saucer is alive', () => {
-    let s = playing(1979)
-    // Get a live saucer via the real director, then step it across most of its
-    // crossing; its size must be invariant tick to tick.
-    for (let i = 0; i < spawnWindow(); i++) {
-      s = updateSpawnDirector(s, DT)
-      if (s.saucer !== null) break
+  it('fixes a saucer size at spawn — it never changes while alive, for BOTH variants', () => {
+    // Drive a real director-spawned saucer across most of its crossing and assert its
+    // size is invariant tick to tick. Run it for a large saucer (score 0) AND a small
+    // saucer (score above the small-only ceiling) so the `size: saucer.size` carry in
+    // stepSaucer is exercised on both branches — a small-only regression that dropped or
+    // re-rolled the field would otherwise hide (the score-0-only version never spawned
+    // a small saucer to catch it).
+    const assertStableFor = (score: number, expected: SaucerSize): void => {
+      let s = playing(1979, { score })
+      for (let i = 0; i < spawnWindow(); i++) {
+        s = updateSpawnDirector(s, DT)
+        if (s.saucer !== null) break
+      }
+      const size0 = requireSaucer(s).size
+      expect(size0).toBe(expected) // this score really produced the variant under test
+      let stepped = 0
+      for (let i = 0; i < Math.ceil(WORLD_W / SAUCER_SPEED) + 50; i++) {
+        s = stepGame(s, NO_INPUT, DT)
+        if (s.saucer === null) break
+        expect(requireSaucer(s).size).toBe(size0) // stable identity, never re-rolled or dropped
+        stepped++
+      }
+      expect(stepped).toBeGreaterThan(0) // the carry-through was actually exercised (non-vacuous)
     }
-    const size0 = requireSaucer(s).size
-    expect(size0 === 'large' || size0 === 'small').toBe(true) // a real variant, not undefined
-    for (let i = 0; i < Math.ceil(WORLD_W / SAUCER_SPEED) + 50; i++) {
-      s = stepGame(s, NO_INPUT, DT)
-      if (s.saucer === null) break
-      expect(requireSaucer(s).size).toBe(size0) // stable identity, never re-rolled or dropped
-    }
+
+    assertStableFor(0, 'large') // large branch
+    assertStableFor(SAUCER_AIM_PERFECT_SCORE * 3, 'small') // small branch (score ≥ small-only → always small)
   })
 
-  it('selects size deterministically: identical seed + score spawn the same variant', () => {
-    const highScore = SAUCER_AIM_PERFECT_SCORE * 3
-    for (const seed of [1979, 4242, 90210, 314]) {
-      const a = spawnSaucerAt(seed, { score: highScore }).size
-      const b = spawnSaucerAt(seed, { score: highScore }).size
+  it('selects size deterministically from the seed at a MID-RAMP score (rng-decided, not a probability-1 tautology)', () => {
+    // The score MUST sit strictly inside the ramp (SAUCER_SMALL_MIN_SCORE < score <
+    // the small-only ceiling) so `smallProbability ∈ (0,1)` and the variant genuinely
+    // depends on the seeded rng draw. A score at/above the small-only ceiling would make
+    // pickSize return 'small' unconditionally, so "same seed → same variant" would hold
+    // for ANY source (even Math.random) — a vacuous tautology. `SAUCER_SMALL_MIN_SCORE *
+    // 2` (= 20000) is comfortably mid-ramp; the `sizes.size === 2` guard below fails loudly
+    // if that ever stops being true.
+    const midScore = SAUCER_SMALL_MIN_SCORE * 2
+    const sizes = new Set<SaucerSize>()
+    for (const seed of SEEDS) {
+      const a = spawnSaucerAt(seed, { score: midScore }).size
+      const b = spawnSaucerAt(seed, { score: midScore }).size
       expect(a === 'large' || a === 'small').toBe(true) // a real variant, not undefined
-      expect(a).toBe(b)
+      expect(b).toBe(a) // identical seed + score → identical variant (determinism)
+      sizes.add(a)
     }
+    // Non-vacuity: at a mid-ramp score the variant IS rng-decided, so both occur across
+    // the seed set. This makes the determinism check above binding — a non-seeded source
+    // (Math.random) would make same-seed spawns disagree and fail `b === a`; a constant
+    // (probability-1) score would collapse this set to one element and fail here.
+    expect(sizes.size).toBe(2)
   })
 })
 
