@@ -17,13 +17,65 @@
 // CCW positive) — smoother for an outline than quantising through the coarse
 // ThrustTbl, and it agrees with ship.ts's flight model at every heading.
 
-import { WORLD_W, WORLD_H, type GameState, type Ship } from '../core/state'
+import {
+  WORLD_W,
+  WORLD_H,
+  type GameState,
+  type Ship,
+  type Rock,
+  type Bullet,
+  type Saucer,
+} from '../core/state'
+import { ROCK_HITBOX } from '../core/rocks'
 import type { Input } from '../core/input'
 
 const SHIP_COLOR = '#ffffff' // 1979 Asteroids is white-phosphor monochrome
 const FLAME_COLOR = '#ffb454' // warm thrust flame (A-19 recalibrates palette)
 const GLOW_BLUR = 8
 const LINE_WIDTH = 2
+
+// Rock outline radius per tier, world lo-units: the collision half-extent
+// (rocks.ts ROCK_HITBOX, 132/72/42) drawn ~30% proud, so rocks die a touch
+// inside their outline — generous-to-player, the arcade feel. Provisional;
+// A-17 ports the ROM-exact shape tables and calibrates size.
+const ROCK_OUTLINE_SCALE = 1.3
+
+// The four rock silhouettes (ROCK_SHAPE_VARIANT_COUNT = 4), unit-radius,
+// hand-drawn lumpy polygons in the arcade style. Fixed per shapeVariant —
+// rocks never rotate (ROM-confirmed, state.ts) and never change shape.
+// Provisional until A-17 ports the ROM-exact tables.
+const ROCK_VARIANTS: ReadonlyArray<ReadonlyArray<readonly [number, number]>> = [
+  [
+    [0.0, 1.0], [0.5, 0.75], [1.0, 0.4], [0.75, 0.0], [1.0, -0.45], [0.5, -1.0],
+    [-0.05, -0.7], [-0.55, -0.95], [-1.0, -0.4], [-0.8, 0.15], [-1.0, 0.5], [-0.45, 0.95],
+  ],
+  [
+    [-0.25, 1.0], [0.35, 0.8], [1.0, 0.5], [0.7, 0.1], [1.0, -0.3], [0.4, -0.95],
+    [-0.1, -0.6], [-0.5, -1.0], [-0.95, -0.5], [-0.7, 0.0], [-1.0, 0.45],
+  ],
+  [
+    [0.1, 1.0], [0.65, 0.7], [1.0, 0.25], [0.9, -0.35], [0.45, -0.9], [0.0, -0.65],
+    [-0.45, -1.0], [-1.0, -0.55], [-0.75, -0.05], [-1.0, 0.4], [-0.5, 0.8],
+  ],
+  [
+    [-0.05, 0.95], [0.45, 1.0], [0.95, 0.55], [0.65, 0.2], [1.0, -0.25], [0.6, -0.85],
+    [0.1, -1.0], [-0.4, -0.8], [-0.9, -0.95], [-1.0, -0.3], [-0.85, 0.3], [-0.4, 0.65],
+  ],
+]
+
+// A shot is a DVG point on the real cabinet; a tiny diamond reads as a glowing
+// dot at our line weight. Radius in world lo-units (~2 screen px at 1024-wide).
+const BULLET_RADIUS = 16
+
+// Large-saucer silhouette dimensions, world lo-units — the classic lens hull
+// with a domed canopy, a shade under twice the ship's width. Visual-only until
+// A-13 lands saucer collisions; A-17 ports exact tables. y is world-up.
+const SAUCER_HALF_W = 140
+const SAUCER_HULL_TOP = 44
+const SAUCER_HULL_BOTTOM = -40
+const SAUCER_HULL_SHOULDER = 56
+const SAUCER_CANOPY_HALF_W = 30
+const SAUCER_CANOPY_TOP = 78
 
 // Ship silhouette dimensions, in world lo-units (~200 tip-to-tail → ~25px on a
 // 1024-wide field). Provisional — see file header.
@@ -115,8 +167,88 @@ function drawFlame(ctx: CanvasRenderingContext2D, ship: Ship, view: View): void 
   )
 }
 
-/** Paint one frame: a fresh black field, then the ship, then the thrust flame
- *  when the current input is thrusting. Pure over `state` — reads, never writes. */
+/** One asteroid: its fixed shapeVariant silhouette scaled to its size tier,
+ *  centred on its position. No rotation — rocks drift, never turn (state.ts). */
+function drawRock(ctx: CanvasRenderingContext2D, rock: Rock, view: View): void {
+  const radius = ROCK_HITBOX[rock.size] * ROCK_OUTLINE_SCALE
+  const outline = ROCK_VARIANTS[rock.shapeVariant % ROCK_VARIANTS.length]
+  const { x, y } = rock.pos
+  strokePoly(
+    ctx,
+    outline.map(([ux, uy]) => [x + ux * radius, y + uy * radius] as const),
+    view,
+    SHIP_COLOR,
+    true,
+  )
+}
+
+/** A shot in flight: a tiny closed diamond that glows into a dot. Player and
+ *  saucer shots draw alike — the cabinet is monochrome. */
+function drawBullet(ctx: CanvasRenderingContext2D, bullet: Bullet, view: View): void {
+  const { x, y } = bullet.pos
+  strokePoly(
+    ctx,
+    [
+      [x, y + BULLET_RADIUS],
+      [x + BULLET_RADIUS, y],
+      [x, y - BULLET_RADIUS],
+      [x - BULLET_RADIUS, y],
+    ],
+    view,
+    SHIP_COLOR,
+    true,
+  )
+}
+
+/** The large saucer (A-11): lens-shaped hull, domed canopy, and the waistline
+ *  seam across the widest point. Axis-aligned — the saucer never banks. */
+function drawSaucer(ctx: CanvasRenderingContext2D, saucer: Saucer, view: View): void {
+  const { x, y } = saucer.pos
+  // Hull: the closed six-point lens.
+  strokePoly(
+    ctx,
+    [
+      [x - SAUCER_HALF_W, y],
+      [x - SAUCER_HULL_SHOULDER, y + SAUCER_HULL_TOP],
+      [x + SAUCER_HULL_SHOULDER, y + SAUCER_HULL_TOP],
+      [x + SAUCER_HALF_W, y],
+      [x + SAUCER_HULL_SHOULDER, y + SAUCER_HULL_BOTTOM],
+      [x - SAUCER_HULL_SHOULDER, y + SAUCER_HULL_BOTTOM],
+    ],
+    view,
+    SHIP_COLOR,
+    true,
+  )
+  // Canopy: an open dome sitting on the hull top.
+  strokePoly(
+    ctx,
+    [
+      [x - SAUCER_HULL_SHOULDER, y + SAUCER_HULL_TOP],
+      [x - SAUCER_CANOPY_HALF_W, y + SAUCER_CANOPY_TOP],
+      [x + SAUCER_CANOPY_HALF_W, y + SAUCER_CANOPY_TOP],
+      [x + SAUCER_HULL_SHOULDER, y + SAUCER_HULL_TOP],
+    ],
+    view,
+    SHIP_COLOR,
+    false,
+  )
+  // Waistline: the seam across the widest point.
+  strokePoly(
+    ctx,
+    [
+      [x - SAUCER_HALF_W, y],
+      [x + SAUCER_HALF_W, y],
+    ],
+    view,
+    SHIP_COLOR,
+    false,
+  )
+}
+
+/** Paint one frame: a fresh black field, then rocks, the saucer (when live),
+ *  shots, and the ship on top — with the thrust flame when the current input is
+ *  thrusting. A destroyed ship (A-8's sticky latch) leaves the drawn set until
+ *  A-15 respawns it. Pure over `state` — reads, never writes. */
 export function render(
   ctx: CanvasRenderingContext2D,
   state: GameState,
@@ -128,6 +260,11 @@ export function render(
   ctx.fillRect(0, 0, w, h)
 
   const view: View = { w, h, scale: Math.min(w / WORLD_W, h / WORLD_H) }
-  drawShip(ctx, state.ship, view)
-  if (input.thrust) drawFlame(ctx, state.ship, view)
+  for (const rock of state.rocks) drawRock(ctx, rock, view)
+  if (state.saucer) drawSaucer(ctx, state.saucer, view)
+  for (const bullet of state.bullets) drawBullet(ctx, bullet, view)
+  if (!state.shipDestroyed) {
+    drawShip(ctx, state.ship, view)
+    if (input.thrust) drawFlame(ctx, state.ship, view)
+  }
 }

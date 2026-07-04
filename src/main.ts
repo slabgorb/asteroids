@@ -34,7 +34,12 @@ window.addEventListener('resize', resize)
 resize()
 
 const input = createInputController()
-let state: GameState = initialState()
+// PROVISIONAL (A-16 replaces this): boot straight into play. initialState()
+// boots 'attract' and nothing transitions out of it until A-16 lands the
+// attract/start flow — but the wave and saucer directors and collisions all
+// gate on 'playing' (waves.ts updateWaveDirector), so an attract boot is a
+// rockless field forever. A-16 swaps this for the real attract→start flow.
+let state: GameState = { ...initialState(), mode: 'playing' }
 // The renderer needs the frame's input to draw the thrust flame — the pure core
 // carries no "thrusting" flag (GameState.ship is pos/vel/dir only). Sample once
 // per fixed step and reuse in render; seeded with an all-false sample so the

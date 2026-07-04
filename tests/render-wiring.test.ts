@@ -40,6 +40,36 @@ describe('render.ts — the shell renderer exists and stays a renderer (AC-1, bo
   })
 })
 
+describe('render.ts — draws every live entity class, not just the ship (playfield gap)', () => {
+  // The sim has carried rocks (A-6), bullets (A-4), and the saucer (A-11) for
+  // stories, but render() only ever stroked the ship — the cabinet LOOKED like
+  // A-5 while simulating A-11. These contracts pin the renderer to reading each
+  // entity collection; the shapes themselves are eyeball-verified per the house
+  // convention above, and A-17/A-19 refine outlines/glow.
+  it('reads state.rocks — asteroids must be drawn', () => {
+    expect(existsSync(RENDER)).toBe(true)
+    expect(/\bstate\.rocks\b/.test(read(RENDER)), 'render.ts must draw state.rocks').toBe(true)
+  })
+
+  it('reads state.bullets — shots must be drawn', () => {
+    expect(existsSync(RENDER)).toBe(true)
+    expect(/\bstate\.bullets\b/.test(read(RENDER)), 'render.ts must draw state.bullets').toBe(true)
+  })
+
+  it('reads state.saucer — the saucer must be drawn when live', () => {
+    expect(existsSync(RENDER)).toBe(true)
+    expect(/\bstate\.saucer\b/.test(read(RENDER)), 'render.ts must draw state.saucer').toBe(true)
+  })
+
+  it('respects shipDestroyed — a destroyed ship is out of the drawn set (A-8 latch)', () => {
+    expect(existsSync(RENDER)).toBe(true)
+    expect(
+      /\bshipDestroyed\b/.test(read(RENDER)),
+      'render.ts must gate the ship on state.shipDestroyed',
+    ).toBe(true)
+  })
+})
+
 describe('main.ts — wires the renderer and real input (AC-1, AC-5)', () => {
   it('imports and drives the shell renderer (replacing the A-1 placeholder draw)', () => {
     expect(existsSync(MAIN)).toBe(true)
@@ -66,5 +96,18 @@ describe('main.ts — wires the renderer and real input (AC-1, AC-5)', () => {
       /stepGame\s*\([^)]*NO_INPUT/.test(src),
       'main.ts must not feed NO_INPUT to stepGame',
     ).toBe(false)
+  })
+
+  it("boots into 'playing' until A-16 lands the attract/start flow (PROVISIONAL)", () => {
+    // initialState() boots 'attract', and nothing transitions out of it until
+    // A-16 — but the wave/saucer directors and collisions all gate on 'playing'
+    // (waves.ts updateWaveDirector), so an attract boot is a rockless field
+    // forever. Until the real start flow exists, main.ts must force play mode.
+    // A-16's TEA REPLACES this contract with the attract→start→playing flow.
+    expect(existsSync(MAIN)).toBe(true)
+    expect(
+      /['"]playing['"]/.test(read(MAIN)),
+      "main.ts must boot the sim into 'playing' (provisional until A-16)",
+    ).toBe(true)
   })
 })
