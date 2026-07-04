@@ -13,7 +13,8 @@
 // assert the mask lands BEFORE the first HUD glyph — the deterministic expression
 // of "does not obscure UI elements". Exact opacity is a feel value the house
 // convention verifies in the dev server, so this suite pins that the mask reads as
-// a dark overlay in the margin, not its precise alpha.
+// a light overlay in the margin (the play area is pure black, so the mask lightens
+// to frame it — see session Design Deviations), not its precise alpha.
 //
 // An INDEPENDENT oracle (`fit`) re-derives the expected playfield from the WORLD
 // constants so the margin/play-area classification is not circular with margin.ts.
@@ -93,12 +94,14 @@ const containsPoint = (f: FillRec, x: number, y: number): boolean =>
 const hitsPlayfield = (f: FillRec, p: ReturnType<typeof fit>): boolean =>
   f.x + f.w > p.left + EPS && f.x < p.right - EPS && f.y + f.h > p.top + EPS && f.y < p.bottom - EPS
 
-/** A dark overlay: black-family fill (globalAlpha carries the transparency, or an
- *  rgba()/#rrggbbaa spec does). Matches the two natural implementations without
- *  pinning the exact opacity, which is browser-verified. */
-const isDarkOverlay = (style: string): boolean => {
+/** A light overlay: white-family fill (globalAlpha, or an rgba()/#rrggbbaa alpha,
+ *  carries the transparency). The play area is pure black (#000), so the margin
+ *  mask must LIGHTEN to frame it — a dark mask would vanish on black. See the
+ *  session Design Deviations (A2-1 spec reconciliation: "light mask", story
+ *  title). Pins colour polarity, not the exact alpha, which is browser-verified. */
+const isLightOverlay = (style: string): boolean => {
   const s = style.trim().toLowerCase()
-  return /^#0{3,8}$/.test(s) || s === 'black' || /^rgba?\(\s*0\s*,\s*0\s*,\s*0\b/.test(s)
+  return /^#f{3,8}$/.test(s) || s === 'white' || /^rgba?\(\s*255\s*,\s*255\s*,\s*255\b/.test(s)
 }
 
 const playingState = (over: Partial<GameState> = {}, mode: Mode = 'playing'): GameState => ({
@@ -147,11 +150,13 @@ describe('render margin mask — pillarbox (wide canvas)', () => {
     }
   })
 
-  it('reads as a dark overlay (AC-2 intent; exact opacity is browser-verified)', () => {
+  it('reads as a light overlay (AC-2 intent; exact opacity is browser-verified)', () => {
     const { ctx, fills } = makeCtx()
     render(ctx, playingState(), W, H, NO_INPUT)
-    for (const f of maskFillsOf(fills, W, H)) {
-      expect(isDarkOverlay(f.style), `mask fill style "${f.style}" is not a dark overlay`).toBe(true)
+    const mask = maskFillsOf(fills, W, H)
+    expect(mask.length, 'no mask to check the colour of').toBeGreaterThan(0)
+    for (const f of mask) {
+      expect(isLightOverlay(f.style), `mask fill style "${f.style}" is not a light overlay`).toBe(true)
     }
   })
 
