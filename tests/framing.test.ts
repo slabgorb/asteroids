@@ -28,9 +28,9 @@
 //    across the confirm's gameover->attract transition must NOT also start a
 //    new game on the next tick — otherwise one Enter press skips the board the
 //    player just earned a place on.
-//  - STARTING_LIVES is a stub (>= 1) until A-15 lands the ROM lives/respawn
-//    model; tests pin the relationship (lives === STARTING_LIVES on start), not
-//    the magnitude.
+//  - STARTING_LIVES: this file pins only the relationship (lives ===
+//    STARTING_LIVES on start); the ROM magnitude (3, A-15) is pinned in
+//    tests/lives.test.ts.
 
 import { describe, it, expect } from 'vitest'
 import { stepGame, enterInitial } from '../src/core/sim'
@@ -61,7 +61,7 @@ const typeAll = (s: GameState, chars: string[]): GameState =>
 // ---- STARTING_LIVES ----------------------------------------------------------
 
 describe('STARTING_LIVES', () => {
-  it('is a positive integer (stub until A-15 lands the ROM lives model)', () => {
+  it('is a positive integer (the ROM magnitude, 3, is pinned in tests/lives.test.ts)', () => {
     expect(Number.isInteger(STARTING_LIVES)).toBe(true)
     expect(STARTING_LIVES).toBeGreaterThanOrEqual(1)
   })

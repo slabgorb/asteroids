@@ -6,16 +6,13 @@
 // display-timer path. (The qualifying initials-entry path and STARTING_LIVES
 // live in tests/framing.test.ts.)
 //
-// Review rework (round 1) — the Thought Police's [HIGH] finding: the original
-// death seam only ended the run when `lives` hit exactly 0 after one decrement,
-// so a player holding a bonus ship (applyScore, 10000 points) who died was
-// stranded — no respawn exists until A-15, no gameover fired, and the sticky
-// shipDestroyed latch left an invisible, immortal ship: the high-score capture
-// was unreachable for precisely the runs good enough to chart. The revised
-// contract pinned here: **while respawn is unbuilt, ANY destruction edge in
-// play ends the run** — reserves are forfeit (lives -> 0 at gameover entry) and
-// A-15 replaces this terminal-death stub with decrement + safe-respawn while
-// ships remain, keeping the lives-0 edge.
+// A-16 history: review round 1 ([HIGH]) installed a terminal-death stub here —
+// ANY destruction edge ended the run with reserves forfeit, because no respawn
+// existed yet. A-15 has since replaced that stub with the real lives model
+// (decrement + clear-center safe-respawn + invulnerability while ships remain
+// — see tests/lives.test.ts). What this file keeps is the surviving half of
+// the old contract: destruction with NO ships left enters 'gameover' in the
+// same step, with the gameOver phase initialised.
 //
 // Contract pinned here (context-story-A-16.md, Technical Approach + ACs):
 //  - GameState carries `gameOver: GameOverPhase | null` (null outside
@@ -25,9 +22,10 @@
 //    with updateRocks, not golden values); ship/bullets/score/lives are inert
 //    regardless of held gameplay inputs; input.start begins a fresh game using
 //    initialState's field defaults WITHOUT re-seeding the rng.
-//  - 'gameover' entry: any ship destruction during play flips mode to
-//    'gameover' in the SAME step (terminal-death stub, per above) and
-//    initialises `gameOver` with qualifies = qualifiesForHighScore semantics.
+//  - 'gameover' entry: ship destruction with no ships in reserve flips mode
+//    to 'gameover' in the SAME step (deaths with reserves decrement and
+//    respawn instead — A-15, pinned in tests/lives.test.ts) and initialises
+//    `gameOver` with qualifies = qualifiesForHighScore semantics.
 //  - 'gameover', non-qualifying: displayTimer counts down by dt; on reaching
 //    zero the state returns to 'attract' with gameOver cleared to null and
 //    initials never touched.
@@ -231,27 +229,19 @@ describe("stepGame — start press ('attract' -> 'playing')", () => {
   })
 })
 
-// ---- playing -> gameover: the terminal-death stub (A-15 replaces) -------------
+// ---- playing -> gameover: the last-ship death (A-15 owns deaths with reserves) --
 
-describe("stepGame — 'gameover' entry (any ship destruction ends the run)", () => {
+describe("stepGame — 'gameover' entry (destruction with no reserves ends the run)", () => {
+  // The aboutToDie fixtures default to lives = 1 — the LAST ship. Deaths with
+  // ships in reserve no longer end the run: A-16's reserves-forfeit stub was
+  // replaced by A-15's decrement + safe-respawn contract, pinned in
+  // tests/lives.test.ts ("a death with ships in reserve decrements and keeps
+  // the run alive").
   it('enters gameover in the same step the last ship is destroyed', () => {
     const s1 = stepGame(aboutToDie(500), NO_INPUT, DT)
     expect(s1.shipDestroyed).toBe(true)
     expect(s1.lives).toBe(0)
     expect(s1.mode).toBe('gameover')
-  })
-
-  it('ends the run even with bonus ships in reserve (reserves forfeit until A-15)', () => {
-    // Review [HIGH] rework pin: a bonus ship (applyScore at 10000 points) must
-    // NOT strand a dead-but-undying run. With no respawn until A-15, ANY
-    // destruction edge is terminal: gameover fires and reserves are forfeit —
-    // otherwise the invisible immortal ship can never reach the high-score
-    // board its run just earned a place on.
-    const s1 = stepGame(aboutToDie(12000, [], 11, 3), NO_INPUT, DT)
-    expect(s1.shipDestroyed).toBe(true)
-    expect(s1.mode).toBe('gameover')
-    expect(s1.lives).toBe(0) // forfeited, so the HUD tells no lies on the card
-    expect(s1.gameOver?.qualifies).toBe(true) // the qualifying run gets its board
   })
 
   it('initialises the gameOver phase: no initials, unconfirmed, timer armed', () => {
