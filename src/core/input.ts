@@ -12,6 +12,11 @@ export interface Input {
   thrust: boolean
   fire: boolean
   hyperspace: boolean
+  /** The cabinet's start button (A-16): begins a game from attract and confirms
+   * initials on the qualifying game-over path. Edge-triggered in the sim via
+   * GameState.startPrev (the same shift-register debounce as firePrev), so a
+   * press held across a mode transition is consumed once, not twice. */
+  start: boolean
 }
 
 export const NO_INPUT: Input = {
@@ -20,4 +25,5 @@ export const NO_INPUT: Input = {
   thrust: false,
   fire: false,
   hyperspace: false,
+  start: false,
 }

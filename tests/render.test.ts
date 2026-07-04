@@ -69,6 +69,9 @@ function makeCtx() {
       clears.push({ x, y, w, h })
     },
     arc() {},
+    // A-16: the HUD draws text; this suite asserts vector geometry only, so the
+    // text call is a recorded-nowhere no-op (tests/render-hud.test.ts owns text).
+    fillText() {},
   }
   return { ctx: rec as unknown as CanvasRenderingContext2D, segments, fills, clears }
 }
