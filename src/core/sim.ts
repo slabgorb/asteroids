@@ -38,6 +38,46 @@ function overlaps(a: Vec2, b: Vec2, extent: number): boolean {
   return Math.abs(d.x) < extent && Math.abs(d.y) < extent
 }
 
+/** Does the segment p0→p1 pass through the origin-centred AABB of half-extent
+ * `e` (|x| < e AND |y| < e)? Parametric slab clip: for each axis, narrow t to the
+ * sub-interval of [0, 1] where that axis stays inside [−e, e]; a hit is a non-empty
+ * intersection of the two axes' intervals. An axis with no motion (d === 0) is a
+ * pass/fail on whether its constant coordinate is already inside the slab. */
+function segmentHitsBox(p0: Vec2, p1: Vec2, e: number): boolean {
+  let t0 = 0
+  let t1 = 1
+  for (const axis of ['x', 'y'] as const) {
+    const a = p0[axis]
+    const d = p1[axis] - a
+    if (d === 0) {
+      if (a <= -e || a >= e) return false // parallel to this slab and outside it
+    } else {
+      const ta = (-e - a) / d
+      const tb = (e - a) / d
+      t0 = Math.max(t0, Math.min(ta, tb))
+      t1 = Math.min(t1, Math.max(ta, tb))
+      if (t0 > t1) return false
+    }
+  }
+  return true
+}
+
+/** Wrap-aware SWEPT overlap: true when the segment a bullet traversed THIS frame —
+ * from its pre-move to its post-move position — comes within `extent` on both axes
+ * of `target` (an AABB of half-extent `extent`). Endpoint-only testing tunnels: a
+ * shot steps 111+ lo-units/frame, wider than a small rock's 84-unit window, so a
+ * fast shot can start and end outside the box while its path crosses the rock.
+ * Bullets fly at constant velocity, so the pre-move position is exactly the
+ * post-move one minus this frame's travel (`vel * frames`); working in `target`'s
+ * local delta frame keeps the whole test seam-aware without re-wrapping the segment
+ * (it spans at most a couple hundred units, far shorter than the field). Degenerates
+ * to `overlaps` when the bullet is motionless (start === end). */
+function sweptOverlaps(pos: Vec2, vel: Vec2, target: Vec2, extent: number, frames: number): boolean {
+  const end = wrappedDelta(pos, target, WORLD_BOUNDS) // post-move, seam-aware
+  const start = { x: end.x - vel.x * frames, y: end.y - vel.y * frames } // pre-move, same local frame
+  return segmentHitsBox(start, end, extent)
+}
+
 /** The attract branch: rocks keep drifting through the SAME A-6 mover the play
  * mode uses (never a parallel one), while the ship, guns, scoring, and
  * collisions are all inert regardless of held gameplay inputs. A fresh start
@@ -164,6 +204,10 @@ export function stepGame(state: GameState, input: Input, dt: number): GameState 
   // a small rock despawns to nothing (drawing no rng). splitRock mutates `rng`
   // — this step's own clone of state.rng — so the advanced seed is threaded
   // forward in the returned state, keeping the replay deterministic.
+  // The per-frame travel scalar (dt*60 = 1 at 60 Hz) — the SAME unit bullet.ts and
+  // rocks.ts integrate by. The swept hit-test reconstructs each shot's pre-move
+  // position from this so a fast shot can't tunnel a small rock (see sweptOverlaps).
+  const frames = dt * 60
   const working: Rock[] = [...rocks]
   const survivors: Bullet[] = []
   for (const bullet of liveBullets) {
@@ -173,7 +217,9 @@ export function stepGame(state: GameState, input: Input, dt: number): GameState 
       survivors.push(bullet)
       continue
     }
-    const hit = working.findIndex((r) => overlaps(bullet.pos, r.pos, ROCK_HITBOX[r.size]))
+    const hit = working.findIndex((r) =>
+      sweptOverlaps(bullet.pos, bullet.vel, r.pos, ROCK_HITBOX[r.size], frames),
+    )
     if (hit === -1) {
       survivors.push(bullet)
     } else {
