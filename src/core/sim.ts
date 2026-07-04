@@ -23,6 +23,51 @@ import { applyScore } from './score'
 import { insertHighScore } from './highscore'
 import { handleShipDeath, tryRespawnShip } from './lives'
 import { wrappedDelta, type Bounds } from './bounds'
+import type { GameEvent } from './events'
+
+/** A-18: the ambient heartbeat's tempo — fewer live rocks, faster beats. Pins
+ * the RELATIONSHIP, not a ROM magnitude (no heartbeat quarry exists in this
+ * checkout). verify vs quarry (A-17). */
+const HEARTBEAT_INTERVAL_MAX_S = 1.0
+const HEARTBEAT_INTERVAL_MIN_S = 0.3
+const HEARTBEAT_ROCKS_FOR_MAX = 8
+
+/** Interval until the next beat for a given live rock count — linearly
+ * interpolated between the MIN (field nearly clear) and MAX (field full,
+ * HEARTBEAT_ROCKS_FOR_MAX or more) tempos. */
+function heartbeatInterval(rockCount: number): number {
+  const t = Math.min(1, rockCount / HEARTBEAT_ROCKS_FOR_MAX)
+  return HEARTBEAT_INTERVAL_MIN_S + t * (HEARTBEAT_INTERVAL_MAX_S - HEARTBEAT_INTERVAL_MIN_S)
+}
+
+/** Advance the ambient heartbeat one tick (play only) — the same arm/count/
+ * fire-and-rearm shape as updateSpawnDirector/updateWaveDirector, so the
+ * first eligible tick arms without beating rather than firing instantly. */
+function withHeartbeat(state: GameState, dt: number): GameState {
+  if (state.mode !== 'playing') return state
+  if (state.heartbeatTimer <= 0) {
+    return { ...state, heartbeatTimer: heartbeatInterval(state.rocks.length) }
+  }
+  const remaining = state.heartbeatTimer - dt
+  if (remaining > 0) {
+    return { ...state, heartbeatTimer: remaining }
+  }
+  const event: GameEvent = { type: 'heartbeat' }
+  return { ...state, heartbeatTimer: heartbeatInterval(state.rocks.length), events: [...state.events, event] }
+}
+
+/** Append a saucer-siren start/stop event when the live saucer appears or
+ * disappears between `before` (this frame's pre-saucer-step state) and
+ * `after` (post spawn-director/stepSaucer). Scope note (A-18): only the
+ * spawn/far-edge-despawn lifecycle is covered — a bullet-kill stop is A-13's
+ * territory (see session Design Deviations). */
+function withSirenEdge(before: GameState, after: GameState): GameState {
+  const hadSaucer = before.saucer !== null
+  const hasSaucer = after.saucer !== null
+  if (hadSaucer === hasSaucer) return after
+  const event: GameEvent = hadSaucer ? { type: 'saucer-siren-stop' } : { type: 'saucer-siren-start' }
+  return { ...after, events: [...after.events, event] }
+}
 
 const WORLD_BOUNDS: Bounds = { width: WORLD_W, height: WORLD_H }
 
@@ -103,6 +148,7 @@ function stepAttract(state: GameState, input: Input, dt: number, startPressed: b
     tick: state.tick + 1,
     rocks: updateRocks(state.rocks, dt, WORLD_BOUNDS),
     startPrev: input.start,
+    events: [], // A-18: no gameplay-audio events in attract; never carry a stale frame's forward
   }
 }
 
@@ -117,7 +163,10 @@ function stepGameOver(
   startPressed: boolean,
 ): GameState {
   const rng: Rng = { seed: state.rng.seed }
-  const base: GameState = { ...state, rng, tick: state.tick + 1, startPrev: input.start }
+  // A-18: no gameplay-audio events during gameover; `events: []` here (rather
+  // than at each return below) guarantees every branch of this function gets
+  // a fresh frame, never a carried-forward stale one.
+  const base: GameState = { ...state, rng, tick: state.tick + 1, startPrev: input.start, events: [] }
   const over = state.gameOver
   // Defensive: a gameover state with no phase (pre-A-16 fixtures) just idles.
   if (over === null) return base
@@ -182,13 +231,23 @@ export function stepGame(state: GameState, input: Input, dt: number): GameState 
   // Fire in the direction the ship now faces, inheriting its updated velocity.
   const shipAlive = !state.shipDestroyed
   const ship = shipAlive ? stepShip(state.ship, input, dt) : state.ship
-  const { bullets, firePrev } = stepBullets(
+  const { bullets, firePrev, fired } = stepBullets(
     state.bullets,
     ship,
     shipAlive ? state.firePrev : true,
     input,
     dt,
   )
+
+  // A-18: this frame's gameplay-event channel. thrustPrev always tracks the
+  // physical button (the firePrev precedent), but the EVENT itself is gated
+  // on ship-alive — a dead ship's engine makes no sound.
+  const events: GameEvent[] = []
+  if (fired) events.push({ type: 'fire' })
+  const thrustRisingEdge = shipAlive && input.thrust && !state.thrustPrev
+  const thrustFallingEdge = shipAlive && !input.thrust && state.thrustPrev
+  if (thrustRisingEdge) events.push({ type: 'thrust-start' })
+  if (thrustFallingEdge) events.push({ type: 'thrust-stop' })
 
   let rocks = updateRocks(state.rocks, dt, WORLD_BOUNDS)
   let liveBullets: Bullet[] = bullets
@@ -232,6 +291,7 @@ export function stepGame(state: GameState, input: Input, dt: number): GameState 
       const awarded = applyScore(score, lives, destroyed.size)
       score = awarded.score
       lives = awarded.lives
+      events.push({ type: 'explosion', source: destroyed.size })
       working.splice(hit, 1, ...splitRock(destroyed, rng))
     }
   }
@@ -253,6 +313,12 @@ export function stepGame(state: GameState, input: Input, dt: number): GameState 
   if (!shipDestroyed && shipSpawnTimer <= 0) {
     shipDestroyed = rocks.some((r) => overlaps(ship.pos, r.pos, SHIP_HITBOX + ROCK_HITBOX[r.size]))
   }
+  // The destruction EDGE (not the sticky latch) is the explosion cue — fires
+  // regardless of the lives-0 legacy niche (handleShipDeath's own guard,
+  // below), since a real explosion happened this frame either way.
+  if (!state.shipDestroyed && shipDestroyed) {
+    events.push({ type: 'explosion', source: 'ship' })
+  }
 
   let stepped: GameState = {
     ...state,
@@ -264,9 +330,11 @@ export function stepGame(state: GameState, input: Input, dt: number): GameState 
     score,
     lives,
     firePrev,
+    thrustPrev: input.thrust,
     startPrev: input.start,
     shipDestroyed,
     shipSpawnTimer,
+    events,
   }
 
   // A-15's death seam (replacing A-16's terminal stub): on the destruction
@@ -293,10 +361,10 @@ export function stepGame(state: GameState, input: Input, dt: number): GameState 
   // itself, so draws thread forward without touching the caller's rng. Runs BEFORE
   // the wave director, whose "field clear" gate includes `saucer === null` — so a
   // live saucer holds off the next wave (A-10 forward-compat gate).
-  const withSaucer = updateSpawnDirector(stepSaucer(stepped, dt), dt)
+  const withSaucer = withSirenEdge(stepped, updateSpawnDirector(stepSaucer(stepped, dt), dt))
 
   // The wave director spawns the next wave once the field is clear (play only).
   // It runs on the post-step state and clones the rng itself, so any spawn draws
   // are threaded into the returned state without touching the caller's rng.
-  return updateWaveDirector(withSaucer, dt)
+  return withHeartbeat(updateWaveDirector(withSaucer, dt), dt)
 }

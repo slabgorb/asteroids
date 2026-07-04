@@ -16,6 +16,8 @@ import { createInputController } from './shell/input'
 import { render } from './shell/render'
 import { loadHighScores, saveHighScores } from './shell/storage'
 import { loadVectorFont } from './shell/font'
+import { createAudioEngine } from './shell/audio'
+import { playEventSounds } from './shell/audio-dispatch'
 
 const canvas = document.getElementById('game') as HTMLCanvasElement
 const ctx = canvas.getContext('2d')!
@@ -37,6 +39,15 @@ window.addEventListener('resize', resize)
 resize()
 
 const input = createInputController()
+const audio = createAudioEngine()
+// Browsers forbid starting an AudioContext before a user gesture, so the engine
+// stays inert until the first click/keypress unlocks it. resume() is idempotent,
+// so leaving both listeners attached makes every later gesture a harmless no-op.
+function unlockAudio(): void {
+  audio.resume()
+}
+canvas.addEventListener('click', unlockAudio)
+window.addEventListener('keydown', unlockAudio)
 // Boot into attract for real (A-16 replaces A-11's provisional force-play shim):
 // the sim now owns the attract→start→gameover loop, and the persisted board is
 // threaded into core state where the qualify/insert logic reads it.
@@ -60,6 +71,10 @@ const loop = createLoop(
     frameInput = input.sample()
     const table = state.highScoreTable
     state = stepGame(state, frameInput, dt)
+    // One sound per gameplay event the core emitted this frame (A-18). The
+    // dispatch table lives in the pure, unit-tested shell/audio-dispatch
+    // module so the wiring is tested behaviourally, not by a source text-match.
+    playEventSounds(audio, state.events)
     // Persist the board the moment the core changes it (a confirmed entry) —
     // insertHighScore returns a NEW array, so reference identity is the signal.
     if (state.highScoreTable !== table) saveHighScores(state.highScoreTable)

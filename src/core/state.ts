@@ -10,6 +10,7 @@
 
 import { createRng, type Rng } from './rng'
 import type { HighScoreTable } from './highscore'
+import type { GameEvent } from './events'
 
 /** Screen-space position. 2D, top-down — no third axis in this cabinet. */
 export interface Vec2 {
@@ -158,6 +159,21 @@ export interface GameState {
    * and persists it on change; inside the core it is ordinary deterministic
    * state (qualify on gameover entry, insert on confirm). */
   highScoreTable: HighScoreTable
+  /** A-18: previous frame's thrust-button state — the same shift-register
+   * debounce as firePrev/startPrev, so the shell can loop a sustained engine
+   * hum spanning exactly the held interval instead of retriggering every
+   * frame. Always tracks the physical button (even while the ship is dead),
+   * mirroring firePrev's precedent; the emitted thrust-start/stop EVENT is
+   * separately gated on ship-alive in sim.ts. */
+  thrustPrev: boolean
+  /** A-18: seconds remaining before the next ambient heartbeat beat (play
+   * only). `0` means "not counting" (boot, or just beat) — the same
+   * arm-then-count convention as waveTransitionTimer/saucerSpawnTimer. Tempo
+   * is a function of live rock count, recomputed each time it re-arms. */
+  heartbeatTimer: number
+  /** A-18: this frame's gameplay-event channel, drained by the shell's audio
+   * dispatch. Fresh every step — never accumulates across frames. */
+  events: GameEvent[]
 }
 
 const DEFAULT_SEED = 1979
@@ -200,5 +216,12 @@ export function initialState(seed: number = DEFAULT_SEED): GameState {
     // board with whatever localStorage holds (A-16).
     gameOver: null,
     highScoreTable: [],
+    // Thrust not held at boot, so the very first press reads as a rising edge (A-18).
+    thrustPrev: false,
+    // `0` = not counting; the first playing tick arms it without beating, exactly
+    // like saucerSpawnTimer's first-eligible-frame convention (A-18).
+    heartbeatTimer: 0,
+    // No event fires before the first step (A-18).
+    events: [],
   }
 }
