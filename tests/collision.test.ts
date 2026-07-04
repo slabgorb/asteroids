@@ -384,3 +384,46 @@ describe('collision hardening — kills A-8 mutation-weak survivors (A-9 carry-f
     expect(survivors[0].pos).toEqual(survivorPos) // untouched — zero-drift, still exactly here
   })
 })
+
+describe('stepGame — swept bullet-vs-rock collision (fast shots do NOT tunnel)', () => {
+  // The bug: bullet-vs-rock was hit-tested only at the shot's POST-move position,
+  // once per fixed 1/60 s step. A player shot travels 111+ lo-units/frame (the
+  // cardinal muzzle speed, bullet.ts BULLET_SPEED, plus the ship's velocity) — WIDER
+  // than a small rock's 84-lo-unit hit window (2 * ROCK_HITBOX.small = 84). So a shot
+  // could start just before a small rock and land just past it in a single frame,
+  // sampling neither endpoint inside the window: it tunnels straight through. Medium
+  // (144) and large (264) windows exceed the step, so those tiers always caught the
+  // shot — which is exactly the reported symptom (rocks split fine, smallest survive).
+  // The fix tests the shot's PATH this frame, not just where it lands.
+  //
+  // Every OTHER test in this file fires a MOTIONLESS bullet already overlapping the
+  // rock, so none of them exercised a moving shot — that is why the bug shipped.
+  const R: Vec2 = { x: 5000, y: 3000 } // mid-field: no seam crossing in play here
+
+  // 60 units before the rock, moving +x at the cardinal muzzle speed (111). One
+  // frame advances it to +51 past centre: |−60| (start) and |+51| (end) both exceed
+  // the 42 half-extent, so an endpoint-only check misses — but the path crosses the
+  // rock dead-centre.
+  const fastShotThrough = (offsetY: number): GameState =>
+    playing(4242, {
+      rocks: [rockAt(R, 'small')],
+      bullets: [bulletAt({ x: R.x - 60, y: R.y + offsetY }, { vel: { x: 111, y: 0 } })],
+    })
+
+  it('a fast shot passing through a small rock destroys it (no tunnel)', () => {
+    const s1 = stepGame(fastShotThrough(0), NO_INPUT, DT)
+    expect(s1.rocks).toHaveLength(0) // small rock despawns to nothing (splitRock → [])
+    expect(s1.bullets).toHaveLength(0) // and the shot is consumed
+  })
+
+  it('a fast shot whose whole path stays clear of the window still misses (no over-trigger)', () => {
+    // Same motion, offset in Y beyond the half-extent for the entire path — the
+    // swept test must not manufacture phantom hits on a clean fly-by.
+    const s0 = fastShotThrough(ROCK_HITBOX.small + 20) // |dy| = 62 > 42 for all t
+    const s1 = stepGame(s0, NO_INPUT, DT)
+    expect(s1.rocks).toHaveLength(1) // untouched
+    expect(s1.rocks[0].size).toBe('small')
+    expect(s1.bullets).toHaveLength(1) // shot not consumed
+    expect(s1.rng.seed).toBe(s0.rng.seed) // no split → no rng draw
+  })
+})
