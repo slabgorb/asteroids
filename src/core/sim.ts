@@ -374,8 +374,12 @@ export function stepGame(inState: GameState, input: Input, dt: number): GameStat
   }
   // The destruction EDGE (not the sticky latch) is the explosion cue — fires
   // regardless of the lives-0 legacy niche (handleShipDeath's own guard,
-  // below), since a real explosion happened this frame either way.
-  if (!state.shipDestroyed && shipDestroyed) {
+  // below), since a real explosion happened this frame either way. Gated on the
+  // PRE-jump latch (`wasDeadBefore`), NOT the post-jump `state.shipDestroyed`,
+  // so a failed HYPERSPACE jump (A-14) — which latches shipDestroyed before this
+  // point — cues its explosion/thrust-stop exactly like a collision death,
+  // instead of dying silently.
+  if (!wasDeadBefore && shipDestroyed) {
     events.push({ type: 'explosion', source: 'ship' })
     // A dead ship's engine goes silent (the intent behind the alive-gated thrust
     // events above). But the thrust-stop falling edge can never fire once dead,
@@ -406,6 +410,10 @@ export function stepGame(inState: GameState, input: Input, dt: number): GameStat
     firePrev,
     thrustPrev: input.thrust,
     startPrev: input.start,
+    // A-14: track the physical hyperspace button so the jump is edge-triggered
+    // (a held key fires once, not every tick the window is closed) — the same
+    // shift-register debounce as firePrev/thrustPrev/startPrev.
+    hyperspacePrev: input.hyperspace,
     shipDestroyed,
     shipSpawnTimer,
     events,

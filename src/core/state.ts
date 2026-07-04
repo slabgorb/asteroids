@@ -178,6 +178,11 @@ export interface GameState {
    * mirroring firePrev's precedent; the emitted thrust-start/stop EVENT is
    * separately gated on ship-alive in sim.ts. */
   thrustPrev: boolean
+  /** A-14: previous frame's hyperspace-button state — the same shift-register
+   * debounce as firePrev/thrustPrev/startPrev. Makes the jump EDGE-triggered: a
+   * held key fires one jump, not a fresh jump every tick once the reappearance
+   * window closes. */
+  hyperspacePrev: boolean
   /** A-18: seconds remaining before the next ambient heartbeat beat (play
    * only). `0` means "not counting" (boot, or just beat) — the same
    * arm-then-count convention as waveTransitionTimer/saucerSpawnTimer. Tempo
@@ -232,6 +237,8 @@ export function initialState(seed: number = DEFAULT_SEED): GameState {
     highScoreTable: [],
     // Thrust not held at boot, so the very first press reads as a rising edge (A-18).
     thrustPrev: false,
+    // Hyperspace not held at boot, so the very first press reads as a rising edge (A-14).
+    hyperspacePrev: false,
     // `0` = not counting; the first playing tick arms it without beating, exactly
     // like saucerSpawnTimer's first-eligible-frame convention (A-18).
     heartbeatTimer: 0,

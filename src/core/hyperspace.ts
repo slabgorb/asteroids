@@ -59,16 +59,18 @@ export function rollHyperspacePosition(rng: Rng, bounds: Bounds): Vec2 {
   }
 }
 
-/** Trigger a hyperspace jump. Acts only when `input.hyperspace` is held, the
- * ship is alive, and no jump window is open (`shipSpawnTimer === 0`) — the open
- * window IS the debounce, so holding the key can't re-fire mid-jump and no
- * separate edge tracking is needed. On a jump: roll survival first. A failed
- * roll dies where it stood (handleShipDeath — no reposition). A survived roll
- * draws a new position, teleports there at rest, hides the ship, and arms the
- * reappearance window. Every no-op returns the state untouched — rng included,
- * so a held key that can't act never perturbs the deterministic stream. */
+/** Trigger a hyperspace jump — EDGE-triggered on a fresh press. Acts only on the
+ * rising edge of `input.hyperspace` (`!state.hyperspacePrev`), while the ship is
+ * alive and no jump window is open (`shipSpawnTimer === 0`). The rising edge IS
+ * the debounce: a HELD key fires exactly one jump, not a fresh jump every tick
+ * once the window closes; the window guard additionally blocks a re-press while a
+ * jump is still in flight. On a jump: roll survival first. A failed roll dies
+ * where it stood (handleShipDeath — no reposition). A survived roll draws a new
+ * position, teleports there at rest, hides the ship, and arms the reappearance
+ * window. Every no-op returns the state untouched — rng included — so a held key
+ * that can't act never perturbs the deterministic stream. */
 export function triggerHyperspace(state: GameState, input: Input): GameState {
-  if (!input.hyperspace || state.shipDestroyed || state.shipSpawnTimer > 0) {
+  if (!input.hyperspace || state.hyperspacePrev || state.shipDestroyed || state.shipSpawnTimer > 0) {
     return state
   }
   // A-2 discipline: draw off a CLONE, thread the advanced seed into the result.
