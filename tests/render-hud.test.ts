@@ -19,21 +19,12 @@
 
 import { describe, it, expect } from 'vitest'
 import { render } from '../src/shell/render'
-import { initialState, type GameState } from '../src/core/state'
+import { initialState, type GameState, type GameOverPhase } from '../src/core/state'
 import { NO_INPUT } from '../src/core/input'
 import { formatScore } from '../src/core/score'
 
 const W = 800
 const H = 600
-
-type GameOverPhase = {
-  qualifies: boolean
-  initials: string
-  confirmed: boolean
-  displayTimer: number
-}
-type Entry = { name: string; score: number; wave: number; date?: string }
-type FramedState = GameState & { gameOver: GameOverPhase | null; highScoreTable: Entry[] }
 
 /** Proxy ctx recorder: collects every fillText/strokeText string and counts
  * stroked segments; every other method is a no-op, every property is settable.
@@ -72,7 +63,7 @@ function makeTextCtx() {
   }
 }
 
-const playing = (over: Partial<FramedState> = {}): FramedState => ({
+const playing = (over: Partial<GameState> = {}): GameState => ({
   ...initialState(1),
   mode: 'playing',
   lives: 3,
@@ -135,19 +126,39 @@ describe('render — attract-mode overlay', () => {
     // The overlay may CYCLE (prompt <-> high-score board, per the ROM's
     // pre-game routine), so sample the attract loop across ticks and require
     // the prompt to appear at least once rather than pinning the cycle phase.
-    const attract: FramedState = { ...initialState(1), gameOver: null, highScoreTable: [] }
+    const attract: GameState = initialState(1)
     const seen: string[] = []
     for (let tick = 0; tick <= 600; tick += 30) {
       seen.push(...drawnTexts({ ...attract, tick }))
     }
     expect(seen.some((t) => /START/i.test(t))).toBe(true)
   })
+
+  // Review rework pin ([MEDIUM]): with an EMPTY table the board page
+  // short-circuits back to the prompt, so the test above cannot distinguish a
+  // working cycle from broken paging arithmetic. This one can: a non-empty
+  // board must actually flip pages on the cadence.
+  it('cycles between the prompt page and the high-score board page (non-empty table)', () => {
+    const attract: GameState = {
+      ...initialState(1),
+      highScoreTable: [{ name: 'AAA', score: 9000, wave: 6 }],
+    }
+    const promptPage = drawnTexts({ ...attract, tick: 10 })
+    expect(promptPage.some((t) => /START/i.test(t))).toBe(true)
+    expect(promptPage.some((t) => /HIGH SCORES/i.test(t))).toBe(false)
+
+    const boardPage = drawnTexts({ ...attract, tick: 250 }) // past the page flip
+    expect(boardPage.some((t) => /HIGH SCORES/i.test(t))).toBe(true)
+    expect(boardPage.some((t) => /START/i.test(t))).toBe(false) // page actually flipped
+    // The board lists the persisted entries, not just a header.
+    expect(boardPage.some((t) => t.includes('AAA') && t.includes(formatScore(9000)))).toBe(true)
+  })
 })
 
 // ---- game-over overlay ------------------------------------------------------------
 
 describe('render — game-over overlay', () => {
-  const gameOverState = (over: GameOverPhase, score = 2500): FramedState => ({
+  const gameOverState = (over: GameOverPhase, score = 2500): GameState => ({
     ...initialState(1),
     mode: 'gameover',
     score,
@@ -176,7 +187,9 @@ describe('render — game-over overlay', () => {
       gameOverState({ qualifies: true, initials: 'AC', confirmed: false, displayTimer: 10 }),
     )
     expect(texts.some((t) => /INITIAL/i.test(t))).toBe(true)
-    expect(texts.some((t) => t.includes('AC'))).toBe(true)
+    // Review rework: pin the EXACT echo — typed letters plus underscore
+    // placeholders — not a bare 'AC' substring any future text could satisfy.
+    expect(texts).toContain('AC_')
   })
 })
 
@@ -184,7 +197,7 @@ describe('render — game-over overlay', () => {
 
 describe('render — never mutates the framing state (A-5 AC-4 boundary, extended)', () => {
   it('leaves a game-over state untouched', () => {
-    const s: FramedState = {
+    const s: GameState = {
       ...initialState(9),
       mode: 'gameover',
       score: 777,

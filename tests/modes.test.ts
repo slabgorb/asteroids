@@ -1,39 +1,42 @@
 // tests/modes.test.ts
 //
-// RED-phase suite for Story A-16, Part C: the mode machine inside stepGame —
-// attract as a live rocks-drift backdrop, attract -> playing on a start press,
-// playing -> gameover when the ship is destroyed with no lives remaining, and
-// gameover -> attract on the non-qualifying display-timer path. (The qualifying
-// initials-entry path and the STARTING_LIVES constant live in
-// tests/framing.test.ts, which imports A-16 exports that don't exist pre-GREEN
-// and so REDs as a module-load failure; THIS file imports only pre-A-16 symbols
-// so each behaviour below fails individually and legibly.)
+// Story A-16 suite, Part C: the mode machine inside stepGame — attract as a
+// live rocks-drift backdrop, attract -> playing on a start press, playing ->
+// gameover on ship death, and gameover -> attract on the non-qualifying
+// display-timer path. (The qualifying initials-entry path and STARTING_LIVES
+// live in tests/framing.test.ts.)
+//
+// Review rework (round 1) — the Thought Police's [HIGH] finding: the original
+// death seam only ended the run when `lives` hit exactly 0 after one decrement,
+// so a player holding a bonus ship (applyScore, 10000 points) who died was
+// stranded — no respawn exists until A-15, no gameover fired, and the sticky
+// shipDestroyed latch left an invisible, immortal ship: the high-score capture
+// was unreachable for precisely the runs good enough to chart. The revised
+// contract pinned here: **while respawn is unbuilt, ANY destruction edge in
+// play ends the run** — reserves are forfeit (lives -> 0 at gameover entry) and
+// A-15 replaces this terminal-death stub with decrement + safe-respawn while
+// ships remain, keeping the lives-0 edge.
 //
 // Contract pinned here (context-story-A-16.md, Technical Approach + ACs):
-//  - GameState grows `gameOver: { qualifies; initials; confirmed; displayTimer }
-//    | null` (null outside 'gameover' — A-2's Mode union is NOT extended) and
-//    `highScoreTable: HighScoreEntry[]` (loaded by the shell at boot; [] default).
+//  - GameState carries `gameOver: GameOverPhase | null` (null outside
+//    'gameover' — A-2's Mode union is NOT extended) and
+//    `highScoreTable: HighScoreEntry[]` (loaded by the shell at boot).
 //  - 'attract': rocks drift via the EXISTING A-6 movement (pinned by equality
 //    with updateRocks, not golden values); ship/bullets/score/lives are inert
 //    regardless of held gameplay inputs; input.start begins a fresh game using
 //    initialState's field defaults WITHOUT re-seeding the rng.
-//  - 'gameover' entry (A-16's stub of the A-15 seam, see session Design
-//    Deviations): a ship destroyed during play with no lives remaining flips
-//    mode to 'gameover' in the SAME step and initialises `gameOver` with
-//    qualifies = qualifiesForHighScore(highScoreTable, score) semantics.
+//  - 'gameover' entry: any ship destruction during play flips mode to
+//    'gameover' in the SAME step (terminal-death stub, per above) and
+//    initialises `gameOver` with qualifies = qualifiesForHighScore semantics.
 //  - 'gameover', non-qualifying: displayTimer counts down by dt; on reaching
 //    zero the state returns to 'attract' with gameOver cleared to null and
 //    initials never touched.
-//
-// The local Framed* intersection types mirror the target contract so this file
-// typechecks both pre-GREEN (fields absent from GameState) and post-GREEN
-// (fields present — any drift between these locals and the real declarations
-// then fails tsc, which is exactly the alarm we want).
 
 import { describe, it, expect } from 'vitest'
 import { stepGame } from '../src/core/sim'
 import { initialState, WORLD_W, WORLD_H, type GameState } from '../src/core/state'
 import { NO_INPUT, type Input } from '../src/core/input'
+import type { HighScoreEntry } from '../src/core/highscore'
 import { spawnRocks, updateRocks } from '../src/core/rocks'
 import { createRng, nextFloat } from '../src/core/rng'
 import type { Bounds } from '../src/core/bounds'
@@ -41,23 +44,9 @@ import type { Bounds } from '../src/core/bounds'
 const DT = 1 / 60
 const BOUNDS: Bounds = { width: WORLD_W, height: WORLD_H }
 
-// ---- A-16 contract shims (mirror the target declarations; see header) -------
-
-type GameOverPhase = {
-  qualifies: boolean
-  initials: string
-  confirmed: boolean
-  displayTimer: number
-}
-type Entry = { name: string; score: number; wave: number; date?: string }
-type FramedState = GameState & { gameOver: GameOverPhase | null; highScoreTable: Entry[] }
-type FramedInput = Input & { start: boolean }
-
-const framed = (s: GameState): FramedState => s as FramedState
-
-const START: FramedInput = { ...NO_INPUT, start: true }
+const START: Input = { ...NO_INPUT, start: true }
 // Every gameplay control held at once — attract must ignore ALL of them.
-const MASHED: FramedInput = {
+const MASHED: Input = {
   left: true,
   right: true,
   thrust: true,
@@ -69,7 +58,7 @@ const MASHED: FramedInput = {
 /** An attract-mode field with drifting rocks and a deliberately ADVANCED rng
  * (two draws off the boot seed), so "the stream continues" is distinguishable
  * from "the rng was re-seeded to the boot value". */
-function attractWithRocks(seed = 42): FramedState {
+function attractWithRocks(seed = 42): GameState {
   const rockRng = createRng(seed + 1000) // rock spawns draw from their own rng
   const rng = createRng(seed)
   nextFloat(rng)
@@ -78,42 +67,42 @@ function attractWithRocks(seed = 42): FramedState {
     ...initialState(seed),
     rng: { seed: rng.seed },
     rocks: spawnRocks(rockRng, 3, 'large', BOUNDS),
-    gameOver: null,
-    highScoreTable: [],
   }
 }
 
 /** A mid-game 'playing' state: some score, a live ship, no rocks/bullets. */
-function playingState(seed = 7): FramedState {
+function playingState(seed = 7): GameState {
   return {
     ...initialState(seed),
     mode: 'playing',
     score: 300,
     lives: 2,
     wave: 3,
-    gameOver: null,
-    highScoreTable: [],
   }
 }
 
-/** A 'playing' state one tick from death: 1 life, a stationary rock parked on
- * the ship. The next step latches shipDestroyed and must enter 'gameover'. */
-function aboutToDie(score: number, table: Entry[] = [], seed = 11): FramedState {
+/** A 'playing' state one tick from death: a stationary rock parked on the
+ * ship. The next step latches shipDestroyed and must enter 'gameover'. */
+function aboutToDie(
+  score: number,
+  table: HighScoreEntry[] = [],
+  seed = 11,
+  lives = 1,
+): GameState {
   const s = initialState(seed)
   return {
     ...s,
     mode: 'playing',
     score,
-    lives: 1,
+    lives,
     wave: 2,
     rocks: [{ pos: { ...s.ship.pos }, velocity: { x: 0, y: 0 }, size: 'large', shapeVariant: 0 }],
-    gameOver: null,
     highScoreTable: table,
   }
 }
 
 /** A 'gameover' state on the non-qualifying display path. */
-function nonQualifyingGameOver(displayTimer: number, seed = 5): FramedState {
+function nonQualifyingGameOver(displayTimer: number, seed = 5): GameState {
   return {
     ...initialState(seed),
     mode: 'gameover',
@@ -129,7 +118,7 @@ function nonQualifyingGameOver(displayTimer: number, seed = 5): FramedState {
 
 describe('initialState — A-16 framing fields', () => {
   it('boots in attract mode with no game-over phase and an empty table', () => {
-    const s = framed(initialState(1))
+    const s = initialState(1)
     expect(s.mode).toBe('attract')
     expect(s.gameOver).toBeNull()
     expect(s.highScoreTable).toEqual([])
@@ -166,22 +155,21 @@ describe("stepGame — 'attract' branch", () => {
 
   it('ignores every held gameplay input: ship, bullets, score, lives all inert', () => {
     let s: GameState = attractWithRocks()
-    const before = framed(s)
+    const before = attractWithRocks()
     for (let i = 0; i < 30; i++) s = stepGame(s, MASHED, DT)
-    const after = framed(s)
-    expect(after.ship).toEqual(before.ship) // no thrust, no rotation
-    expect(after.bullets).toEqual([]) // fire spawns nothing without a player
-    expect(after.score).toBe(before.score)
-    expect(after.lives).toBe(before.lives)
-    expect(after.shipDestroyed).toBe(false) // no collision path runs in attract
-    expect(after.saucer).toBeNull()
-    expect(after.highScoreTable).toEqual(before.highScoreTable)
+    expect(s.ship).toEqual(before.ship) // no thrust, no rotation
+    expect(s.bullets).toEqual([]) // fire spawns nothing without a player
+    expect(s.score).toBe(before.score)
+    expect(s.lives).toBe(before.lives)
+    expect(s.shipDestroyed).toBe(false) // no collision path runs in attract
+    expect(s.saucer).toBeNull()
+    expect(s.highScoreTable).toEqual(before.highScoreTable)
   })
 
   it('never collides or splits: rock count is stable with a rock over the ship', () => {
     const s0 = attractWithRocks()
     // Park one rock exactly on the (inert) ship to prove collision is off.
-    const parked: FramedState = {
+    const parked: GameState = {
       ...s0,
       rocks: [
         ...s0.rocks,
@@ -204,7 +192,7 @@ describe("stepGame — start press ('attract' -> 'playing')", () => {
   })
 
   it('starts a fresh game from initialState field defaults', () => {
-    const s1 = framed(stepGame(attractWithRocks(), START, DT))
+    const s1 = stepGame(attractWithRocks(), START, DT)
     const fresh = initialState(1) // any seed — only the mode-independent defaults matter
     expect(s1.score).toBe(0)
     expect(s1.wave).toBe(0)
@@ -227,15 +215,15 @@ describe("stepGame — start press ('attract' -> 'playing')", () => {
   })
 
   it('preserves the persisted high-score table across the reset', () => {
-    const table: Entry[] = [{ name: 'AAA', score: 900, wave: 1 }]
-    const s0: FramedState = { ...attractWithRocks(), highScoreTable: table }
-    const s1 = framed(stepGame(s0, START, DT))
+    const table: HighScoreEntry[] = [{ name: 'AAA', score: 900, wave: 1 }]
+    const s0: GameState = { ...attractWithRocks(), highScoreTable: table }
+    const s1 = stepGame(s0, START, DT)
     expect(s1.highScoreTable).toEqual(table)
   })
 
   it('does NOT reset a game in progress (start is inert while playing)', () => {
     const s0 = playingState()
-    const s1 = framed(stepGame(s0, START, DT))
+    const s1 = stepGame(s0, START, DT)
     expect(s1.mode).toBe('playing')
     expect(s1.score).toBe(300) // no fresh-game wipe mid-run
     expect(s1.lives).toBe(2)
@@ -243,40 +231,53 @@ describe("stepGame — start press ('attract' -> 'playing')", () => {
   })
 })
 
-// ---- playing -> gameover: the A-16 stub of the A-15 death seam ----------------
+// ---- playing -> gameover: the terminal-death stub (A-15 replaces) -------------
 
-describe("stepGame — 'gameover' entry (ship destroyed, no lives remaining)", () => {
+describe("stepGame — 'gameover' entry (any ship destruction ends the run)", () => {
   it('enters gameover in the same step the last ship is destroyed', () => {
-    const s1 = framed(stepGame(aboutToDie(500), NO_INPUT, DT))
+    const s1 = stepGame(aboutToDie(500), NO_INPUT, DT)
     expect(s1.shipDestroyed).toBe(true)
     expect(s1.lives).toBe(0)
     expect(s1.mode).toBe('gameover')
   })
 
+  it('ends the run even with bonus ships in reserve (reserves forfeit until A-15)', () => {
+    // Review [HIGH] rework pin: a bonus ship (applyScore at 10000 points) must
+    // NOT strand a dead-but-undying run. With no respawn until A-15, ANY
+    // destruction edge is terminal: gameover fires and reserves are forfeit —
+    // otherwise the invisible immortal ship can never reach the high-score
+    // board its run just earned a place on.
+    const s1 = stepGame(aboutToDie(12000, [], 11, 3), NO_INPUT, DT)
+    expect(s1.shipDestroyed).toBe(true)
+    expect(s1.mode).toBe('gameover')
+    expect(s1.lives).toBe(0) // forfeited, so the HUD tells no lies on the card
+    expect(s1.gameOver?.qualifies).toBe(true) // the qualifying run gets its board
+  })
+
   it('initialises the gameOver phase: no initials, unconfirmed, timer armed', () => {
-    const over = framed(stepGame(aboutToDie(500), NO_INPUT, DT)).gameOver
+    const over = stepGame(aboutToDie(500), NO_INPUT, DT).gameOver
     expect(over).not.toBeNull()
     expect(over).toMatchObject({ initials: '', confirmed: false })
-    expect((over as GameOverPhase).displayTimer).toBeGreaterThan(0)
+    expect(over?.displayTimer).toBeGreaterThan(0)
   })
 
   it('computes qualifies=true for a positive score with room on the board', () => {
-    const over = framed(stepGame(aboutToDie(500, []), NO_INPUT, DT)).gameOver
+    const over = stepGame(aboutToDie(500, []), NO_INPUT, DT).gameOver
     expect(over?.qualifies).toBe(true)
   })
 
   it('computes qualifies=false for a 0 score (a scoreless run never charts)', () => {
-    const over = framed(stepGame(aboutToDie(0, []), NO_INPUT, DT)).gameOver
+    const over = stepGame(aboutToDie(0, []), NO_INPUT, DT).gameOver
     expect(over?.qualifies).toBe(false)
   })
 
   it('computes qualifies=false when a full board is not strictly beaten', () => {
-    const fullBoard: Entry[] = Array.from({ length: 10 }, (_, i) => ({
+    const fullBoard: HighScoreEntry[] = Array.from({ length: 10 }, (_, i) => ({
       name: `E${i}`,
       score: (10 - i) * 1000, // lowest = 1000
       wave: 1,
     }))
-    const over = framed(stepGame(aboutToDie(1000, fullBoard), NO_INPUT, DT)).gameOver
+    const over = stepGame(aboutToDie(1000, fullBoard), NO_INPUT, DT).gameOver
     expect(over?.qualifies).toBe(false) // ties the 10th — strict boundary
   })
 })
@@ -286,7 +287,7 @@ describe("stepGame — 'gameover' entry (ship destroyed, no lives remaining)", (
 describe("stepGame — 'gameover' non-qualifying countdown", () => {
   it('ticks displayTimer down by dt', () => {
     const s0 = nonQualifyingGameOver(2.5 * DT)
-    const s1 = framed(stepGame(s0, NO_INPUT, DT))
+    const s1 = stepGame(s0, NO_INPUT, DT)
     expect(s1.mode).toBe('gameover')
     expect(s1.gameOver?.displayTimer).toBeCloseTo(1.5 * DT, 10)
   })
@@ -298,18 +299,17 @@ describe("stepGame — 'gameover' non-qualifying countdown", () => {
     expect(s.mode).toBe('gameover')
     s = stepGame(s, NO_INPUT, DT) // expired
     expect(s.mode).toBe('attract')
-    expect(framed(s).gameOver).toBeNull()
+    expect(s.gameOver).toBeNull()
   })
 
   it('never touches initials and never inserts into the table', () => {
     let s: GameState = nonQualifyingGameOver(2.5 * DT)
     for (let i = 0; i < 5; i++) {
-      const f = framed(s)
-      if (f.gameOver !== null) expect(f.gameOver.initials).toBe('')
+      if (s.gameOver !== null) expect(s.gameOver.initials).toBe('')
       s = stepGame(s, NO_INPUT, DT)
     }
     expect(s.mode).toBe('attract')
-    expect(framed(s).highScoreTable).toEqual([{ name: 'AAA', score: 900, wave: 1 }])
+    expect(s.highScoreTable).toEqual([{ name: 'AAA', score: 900, wave: 1 }])
   })
 
   it('does not mutate the caller state while in gameover (purity holds off the happy path)', () => {

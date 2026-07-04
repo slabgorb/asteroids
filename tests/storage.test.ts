@@ -310,6 +310,29 @@ describe('loadHighScores — per-entry validation guard', () => {
     ])
   })
 
+  // Review rework ([LOW]): `typeof score === 'number'` alone admits Infinity —
+  // a poisoned `1e999` row parses to Infinity, renders as "Infinity" on the
+  // HUD, and permanently locks the qualify boundary (nothing beats Infinity).
+  // The lobby's scoreOf already requires Number.isFinite for the same rows;
+  // this pins the game's guard to the same standard. (NaN cannot arrive via
+  // JSON.parse — no literal — but non-finite via 1e999 can and does.)
+  it('drops rows with a non-finite score (1e999 -> Infinity)', () => {
+    setLocalStorage(
+      makeFakeStorage({ [STORAGE_KEY]: '[{"name":"XXX","score":1e999,"wave":1}]' }),
+    )
+    expect(loadHighScores()).toEqual([])
+  })
+
+  it('drops rows with a non-finite wave, keeping well-formed neighbours', () => {
+    setLocalStorage(
+      makeFakeStorage({
+        [STORAGE_KEY]:
+          '[{"name":"AAA","score":500,"wave":1e999},{"name":"BBB","score":400,"wave":2}]',
+      }),
+    )
+    expect(loadHighScores()).toEqual([{ name: 'BBB', score: 400, wave: 2 }])
+  })
+
   // The guard must not OVER-reject: a fully well-formed table returns unchanged.
   it('returns a fully well-formed table unchanged', () => {
     expect(loadFrom(SAMPLE_TABLE)).toEqual(SAMPLE_TABLE)

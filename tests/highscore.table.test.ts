@@ -30,6 +30,8 @@
 //    MAX_HIGH_SCORES; length never exceeds 10 and the lowest overflow is dropped.
 //  - insertHighScore is PURE: returns a NEW array and never mutates its inputs.
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import type { HighScoreEntry, HighScoreTable } from '../src/core/highscore'
 import { qualifiesForHighScore, insertHighScore, MAX_HIGH_SCORES } from '../src/core/highscore'
 
@@ -136,6 +138,30 @@ describe('insertHighScore — ordering, ties, truncation, purity', () => {
     insertHighScore(t, entry('X', 200))
     expect(t).toEqual(snapshot)
     expect(t).toHaveLength(2)
+  })
+
+  // Review rework ([MEDIUM], lang-review #2): purity must live in the SIGNATURE,
+  // not just behaviour — both helpers read the table without mutating it, so
+  // both take `readonly HighScoreEntry[]`, mirroring saveHighScores' enforced
+  // convention (tests/storage.test.ts). Two layers, because vitest (esbuild)
+  // strips types while tsc does not:
+  //  1. runtime/frozen — a frozen table passes through both helpers untouched;
+  //  2. source-text — the declared signatures literally name `readonly`.
+  it('accepts a frozen readonly table in both helpers without throwing', () => {
+    const frozen: readonly HighScoreEntry[] = Object.freeze([entry('A', 300), entry('B', 100)])
+    expect(() => qualifiesForHighScore(frozen, 200)).not.toThrow()
+    const out = insertHighScore(frozen, entry('X', 200))
+    expect(out.map((e) => e.name)).toEqual(['A', 'X', 'B'])
+    expect(frozen).toEqual([entry('A', 300), entry('B', 100)])
+  })
+
+  it('declares readonly table parameters in both source signatures', () => {
+    const src = readFileSync(
+      fileURLToPath(new URL('../src/core/highscore.ts', import.meta.url)),
+      'utf8',
+    )
+    expect(src).toMatch(/export function qualifiesForHighScore\s*\([^)]*\breadonly\b[^)]*\)/)
+    expect(src).toMatch(/export function insertHighScore\s*\([^)]*\breadonly\b[^)]*\)/)
   })
 
   // The recorded `wave` rides along with the entry (the HUD/board renders it).

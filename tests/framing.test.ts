@@ -4,12 +4,12 @@
 // 3-letter initials capture, confirm, table insert — plus the STARTING_LIVES
 // constant and full-cycle determinism across all three modes.
 //
-// This file imports two A-16 exports that do NOT exist pre-GREEN
-// (`enterInitial` from core/sim.ts, `STARTING_LIVES` from core/state.ts), so it
-// fails to LOAD until Dev creates them. That module-load failure IS the RED
-// signal for this suite (the star-wars/tempest RED convention); the granular
-// per-behaviour REDs live in tests/modes.test.ts, which imports only pre-A-16
-// symbols.
+// Originally RED via module-load failure until GREEN created `enterInitial`
+// and `STARTING_LIVES`. Review rework (round 1) added: the frozen-timer
+// contract pin for a qualifying game-over left idle (the Thought Police found
+// the wait-forever behaviour real but unpinned — a regression could silently
+// flip it either way; the ROM's initials timeout is forward-carried to
+// A-17/A-18), and the multi-character enterInitial no-op pin.
 //
 // TEA contract decisions pinned here (each logged in the session's Design
 // Deviations):
@@ -39,21 +39,10 @@ import { NO_INPUT, type Input } from '../src/core/input'
 
 const DT = 1 / 60
 
-type GameOverPhase = {
-  qualifies: boolean
-  initials: string
-  confirmed: boolean
-  displayTimer: number
-}
-type Entry = { name: string; score: number; wave: number; date?: string }
-type FramedState = GameState & { gameOver: GameOverPhase | null; highScoreTable: Entry[] }
-type FramedInput = Input & { start: boolean }
-
-const framed = (s: GameState): FramedState => s as FramedState
-const START: FramedInput = { ...NO_INPUT, start: true }
+const START: Input = { ...NO_INPUT, start: true }
 
 /** A qualifying gameover: score 2500 on wave 4, one existing board entry. */
-function qualifyingGameOver(seed = 3): FramedState {
+function qualifyingGameOver(seed = 3): GameState {
   return {
     ...initialState(seed),
     mode: 'gameover',
@@ -78,7 +67,7 @@ describe('STARTING_LIVES', () => {
   })
 
   it('is what a start press deals out', () => {
-    const attract: FramedState = { ...initialState(8), gameOver: null, highScoreTable: [] }
+    const attract: GameState = initialState(8)
     const s1 = stepGame(attract, START, DT)
     expect(s1.mode).toBe('playing')
     expect(s1.lives).toBe(STARTING_LIVES)
@@ -89,35 +78,35 @@ describe('STARTING_LIVES', () => {
 
 describe('enterInitial — capture rules', () => {
   it('appends an uppercased letter', () => {
-    const s1 = framed(enterInitial(qualifyingGameOver(), 'a'))
+    const s1 = (enterInitial(qualifyingGameOver(), 'a'))
     expect(s1.gameOver?.initials).toBe('A')
   })
 
   it('accepts already-uppercase letters', () => {
-    const s1 = framed(enterInitial(qualifyingGameOver(), 'K'))
+    const s1 = (enterInitial(qualifyingGameOver(), 'K'))
     expect(s1.gameOver?.initials).toBe('K')
   })
 
   it('builds up to three initials in typing order', () => {
-    const s = framed(typeAll(qualifyingGameOver(), ['a', 'c', 'e']))
+    const s = (typeAll(qualifyingGameOver(), ['a', 'c', 'e']))
     expect(s.gameOver?.initials).toBe('ACE')
   })
 
   it('ignores a fourth letter (capped at 3)', () => {
-    const s = framed(typeAll(qualifyingGameOver(), ['a', 'c', 'e', 'x']))
+    const s = (typeAll(qualifyingGameOver(), ['a', 'c', 'e', 'x']))
     expect(s.gameOver?.initials).toBe('ACE')
   })
 
   it('ignores non-letter characters (digits, space, punctuation)', () => {
-    const s = framed(typeAll(qualifyingGameOver(), ['1', ' ', '!', 'b', '.', '3']))
+    const s = (typeAll(qualifyingGameOver(), ['1', ' ', '!', 'b', '.', '3']))
     expect(s.gameOver?.initials).toBe('B')
   })
 
   it('is inert outside a qualifying, unconfirmed gameover', () => {
-    const attract: FramedState = { ...initialState(2), gameOver: null, highScoreTable: [] }
+    const attract: GameState = initialState(2)
     expect(enterInitial(attract, 'a')).toEqual(attract)
 
-    const playing: FramedState = {
+    const playing: GameState = {
       ...initialState(2),
       mode: 'playing',
       gameOver: null,
@@ -125,11 +114,11 @@ describe('enterInitial — capture rules', () => {
     }
     expect(enterInitial(playing, 'a')).toEqual(playing)
 
-    const nonQualifying: FramedState = {
+    const nonQualifying: GameState = {
       ...qualifyingGameOver(),
       gameOver: { qualifies: false, initials: '', confirmed: false, displayTimer: 5 },
     }
-    expect(framed(enterInitial(nonQualifying, 'a')).gameOver?.initials).toBe('')
+    expect((enterInitial(nonQualifying, 'a')).gameOver?.initials).toBe('')
   })
 
   it('is pure: never mutates the input state', () => {
@@ -138,6 +127,33 @@ describe('enterInitial — capture rules', () => {
     enterInitial(s0, 'a')
     expect(s0).toEqual(snapshot)
   })
+
+  // Review rework pin: the public contract is ONE character per call — a
+  // multi-character string is a silent no-op, not a batch append.
+  it('ignores multi-character input (single-char contract)', () => {
+    const s0 = qualifyingGameOver()
+    expect(enterInitial(s0, 'ab')).toEqual(s0)
+    expect((enterInitial(s0, 'ab')).gameOver?.initials).toBe('')
+  })
+})
+
+// ---- qualifying game-over left idle: the wait-forever contract ------------------
+
+describe('stepGame — qualifying game-over waits indefinitely for initials', () => {
+  // Review rework pin ([MEDIUM]): the qualifying branch deliberately does NOT
+  // tick displayTimer — the cabinet holds the ENTER YOUR INITIALS screen until
+  // the player types and confirms. Pinned so a refactor can't silently regress
+  // it in either direction (auto-expiring a qualifying screen would eat the
+  // player's board slot; the ROM-faithful default-entry timeout is a separate,
+  // forward-carried A-17/A-18 concern — see session Delivery Findings).
+  it('holds the phase unchanged across idle ticks: timer frozen, mode pinned', () => {
+    let s: GameState = qualifyingGameOver()
+    const before = qualifyingGameOver()
+    for (let i = 0; i < 300; i++) s = stepGame(s, NO_INPUT, DT) // 5 idle seconds
+    expect(s.mode).toBe('gameover')
+    expect(s.gameOver).toEqual(before.gameOver) // qualifies/initials/confirmed/displayTimer all untouched
+    expect(s.highScoreTable).toEqual(before.highScoreTable) // no phantom insert
+  })
 })
 
 // ---- confirm: insert + return to attract ---------------------------------------
@@ -145,7 +161,7 @@ describe('enterInitial — capture rules', () => {
 describe('stepGame — qualifying confirm (start with 3 initials)', () => {
   it('waits (stays in gameover, no insert) while fewer than 3 initials are typed', () => {
     const partial = typeAll(qualifyingGameOver(), ['a', 'c'])
-    const s1 = framed(stepGame(partial, START, DT))
+    const s1 = (stepGame(partial, START, DT))
     expect(s1.mode).toBe('gameover')
     expect(s1.gameOver?.initials).toBe('AC')
     expect(s1.highScoreTable).toHaveLength(1) // untouched
@@ -153,7 +169,7 @@ describe('stepGame — qualifying confirm (start with 3 initials)', () => {
 
   it('inserts { name, score, wave } into the table and returns to attract', () => {
     const ready = typeAll(qualifyingGameOver(), ['a', 'c', 'e'])
-    const s1 = framed(stepGame(ready, START, DT))
+    const s1 = (stepGame(ready, START, DT))
     expect(s1.mode).toBe('attract')
     expect(s1.gameOver).toBeNull()
     expect(s1.highScoreTable).toHaveLength(2)
@@ -164,13 +180,13 @@ describe('stepGame — qualifying confirm (start with 3 initials)', () => {
 
   it('builds the entry WITHOUT a date: the pure core never reads the wall clock', () => {
     const ready = typeAll(qualifyingGameOver(), ['a', 'c', 'e'])
-    const s1 = framed(stepGame(ready, START, DT))
+    const s1 = (stepGame(ready, START, DT))
     expect(s1.highScoreTable[1].date).toBeUndefined()
   })
 
   it('preserves the final score/wave through the transition for the entry', () => {
-    const ready = framed(typeAll(qualifyingGameOver(), ['z', 'z', 'z']))
-    const s1 = framed(stepGame(ready, START, DT))
+    const ready = (typeAll(qualifyingGameOver(), ['z', 'z', 'z']))
+    const s1 = (stepGame(ready, START, DT))
     const inserted = s1.highScoreTable.find((e) => e.name === 'ZZZ')
     expect(inserted).toMatchObject({ score: ready.score, wave: ready.wave })
   })
