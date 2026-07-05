@@ -38,7 +38,7 @@ function resize(): void {
 window.addEventListener('resize', resize)
 resize()
 
-const input = createInputController()
+const input = createInputController(canvas)
 const audio = createAudioEngine()
 // Browsers forbid starting an AudioContext before a user gesture, so the engine
 // stays inert until the first click/keypress unlocks it. resume() is idempotent,

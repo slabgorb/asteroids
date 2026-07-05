@@ -5,6 +5,12 @@
 // are read. It tracks the currently-held keys and hands the loop a fresh Input
 // snapshot each frame via sample(). Mirrors the sibling games' input controller
 // (star-wars/src/shell/input.ts).
+//
+// A2-4 adds mouse controls: left button fires, right button triggers
+// hyperspace, ORed with the existing keyboard state. Mousedown/contextmenu
+// bind to `target` (the canvas); mouseup/blur bind to `window` so a release
+// off-canvas or a lost-focus alt-tab still clears a held button — mirrors
+// tempest's `createInputController(target)` pattern.
 
 import type { Input } from '../core/input'
 
@@ -30,8 +36,12 @@ const KEYS = {
 // Keys the browser would otherwise scroll the page with — the cabinet owns them.
 const SCROLL_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Space'])
 
-export function createInputController(): InputController {
+const MOUSE_BUTTON = { left: 0, right: 2 } as const
+
+export function createInputController(target: HTMLElement): InputController {
   const held = new Set<string>()
+  let mouseFireHeld = false
+  let mouseHyperspaceHeld = false
 
   window.addEventListener('keydown', (e: KeyboardEvent) => {
     held.add(e.code)
@@ -39,6 +49,24 @@ export function createInputController(): InputController {
   })
   window.addEventListener('keyup', (e: KeyboardEvent) => {
     held.delete(e.code)
+  })
+
+  target.addEventListener('mousedown', (e: MouseEvent) => {
+    if (e.button === MOUSE_BUTTON.left) mouseFireHeld = true
+    else if (e.button === MOUSE_BUTTON.right) mouseHyperspaceHeld = true
+  })
+  window.addEventListener('mouseup', (e: MouseEvent) => {
+    if (e.button === MOUSE_BUTTON.left) mouseFireHeld = false
+    else if (e.button === MOUSE_BUTTON.right) mouseHyperspaceHeld = false
+  })
+  // Right-click is hyperspace, not the OS context menu.
+  target.addEventListener('contextmenu', (e: MouseEvent) => {
+    e.preventDefault()
+  })
+  // Losing focus (alt-tab) must release a held button, or it sticks "on".
+  window.addEventListener('blur', () => {
+    mouseFireHeld = false
+    mouseHyperspaceHeld = false
   })
 
   const any = (codes: readonly string[]): boolean => codes.some((c) => held.has(c))
@@ -49,8 +77,8 @@ export function createInputController(): InputController {
         left: any(KEYS.left),
         right: any(KEYS.right),
         thrust: any(KEYS.thrust),
-        fire: any(KEYS.fire),
-        hyperspace: any(KEYS.hyperspace),
+        fire: any(KEYS.fire) || mouseFireHeld,
+        hyperspace: any(KEYS.hyperspace) || mouseHyperspaceHeld,
         start: any(KEYS.start),
       }
     },
