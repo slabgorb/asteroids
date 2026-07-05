@@ -417,7 +417,7 @@ describe('shot range: ROM timer cadence (A2-9)', () => {
     // shared stepBullets with no fire: both reach the extended life together.
     // (The live saucer seed, SAUCER_BULLET_LIFETIME, is also 18, so real saucer
     // shots gain the same authentic range — the AC's "respective ranges".)
-    const restShip: Ship = { pos: { x: 0, y: 0 }, vel: { x: 0, y: 0 }, dir: 0 }
+    const restShip: Ship = { pos: { x: 0, y: 0 }, vel: { x: 0, y: 0 }, dir: 0, visible: true }
     const mk = (owner: 'player' | 'saucer'): Bullet => ({
       pos: { x: 1000, y: 1000 },
       vel: { x: 10, y: 0 },
