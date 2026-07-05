@@ -19,13 +19,14 @@ export const DEBRIS_LIFETIME_S = 1.5
  * at death, world-units per 60 Hz frame (the Ship.vel/Rock.velocity unit). */
 const BREAKUP_SPEED = 6
 
-/** Angular spread (radians) applied to each piece's outward heading — the
- * same role as rocks.ts's SPLIT_SPREAD_ANGLE. */
+/** Angular spread (radians) applied to each piece's outward heading. A polar
+ * fan is right for ship debris (pieces spray outward from a point); note rocks.ts
+ * splitRock uses a different, ROM-derived per-axis velocity kick (A2-6), not this. */
 const BREAKUP_SPREAD_ANGLE = Math.PI / 4
 
 /** Fracture a destroyed ship into its 4 rendered edges, each an independent
  * debris segment: outward heading from the ship's center to the edge's
- * midpoint, spread by BREAKUP_SPREAD_ANGLE (splitRock's precedent), plus the
+ * midpoint, spread by BREAKUP_SPREAD_ANGLE, plus the
  * ship's own velocity at death (debris carries its momentum). Pure over
  * `ship`; consumes the passed rng — advances its seed, exactly like
  * splitRock, so the caller clones state.rng before calling. */
