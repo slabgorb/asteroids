@@ -54,7 +54,7 @@ import {
 import { stepGame } from '../src/core/sim'
 import { NO_INPUT, type Input } from '../src/core/input'
 import { MAX_OBJECTS_ON_SCREEN, STARTING_ROCKS_CAP } from '../src/core/waves'
-import { MAX_PLAYER_SHOTS } from '../src/core/bullet'
+import { MAX_PLAYER_SHOTS, SHOT_TIMER_PERIOD_FRAMES } from '../src/core/bullet'
 
 const DT = 1 / 60
 const FIRE: Input = { ...NO_INPUT, fire: true }
@@ -435,9 +435,10 @@ describe('large saucer bullets — cap, lifetime & owner discriminant (AC)', () 
   })
 
   it('suppresses fire at the cap and allows it one below — cap is the binding constraint', () => {
-    // The integration test above cannot fail even if the cap check is deleted (with
-    // lifetime 18 / cadence ~10, natural concurrency never exceeds 2 anyway). This
-    // drives `stepSaucer` directly with a state ALREADY holding N live saucer shots
+    // The integration test above cannot fail even if the cap check is deleted:
+    // fire cadence (~10 frames) still spaces shots out, so the cap rarely binds
+    // organically. This drives `stepSaucer` directly with a state ALREADY holding
+    // N live saucer shots
     // and a saucer whose fireTimer is due, so the cap check IS the only thing that can
     // stop a new shot — deleting it makes the at-cap case overflow to MAX+1 and fail.
     const base = requireSaucer(spawnLiveSaucer(1979))
@@ -472,7 +473,15 @@ describe('large saucer bullets — cap, lifetime & owner discriminant (AC)', () 
     let maxLifeSeen = 0
     let sawRemoval = false
     let prevCount = 0
-    for (let i = 0; i < SAUCER_BULLET_LIFETIME + Math.round(SAUCER_FIRE_INTERVAL / DT) + 5; i++) {
+    // A saucer shot's real life is SAUCER_BULLET_LIFETIME timer ticks, each
+    // spanning SHOT_TIMER_PERIOD_FRAMES frames (the ROM's every-4th-frame
+    // decrement, shared with player shots — see A2-9). Widen the window past
+    // that effective life plus a fire interval so a removal is observable.
+    const window =
+      SAUCER_BULLET_LIFETIME * SHOT_TIMER_PERIOD_FRAMES +
+      Math.round(SAUCER_FIRE_INTERVAL / DT) +
+      5
+    for (let i = 0; i < window; i++) {
       s = stepGame(s, NO_INPUT, DT)
       const saucerShots = s.bullets.filter((b) => b.owner === 'saucer')
       for (const b of saucerShots) {
