@@ -50,7 +50,7 @@ import {
   type Vec2,
 } from '../src/core/state'
 import { createRng } from '../src/core/rng'
-import { stepGame } from '../src/core/sim'
+import { stepGame, GAME_OVER_DISPLAY_S } from '../src/core/sim'
 import { NO_INPUT } from '../src/core/input'
 
 const DT = 1 / 60
@@ -485,17 +485,88 @@ describe('stepGame — ship debris keeps fading through game over (Reviewer find
     // frozen into the attract-mode demo loop. score: 0 (playing()'s default)
     // guarantees the non-qualifying path — qualifiesForHighScore rejects any
     // non-positive score outright (highscore.ts), regardless of the board.
+    // NOTE (rework 2): this path does NOT exercise stepAttract's aging — on the
+    // non-qualifying 3s-timed card, debris (1.5s) is always fully faded by the
+    // gameover pipeline BEFORE attract is reached, so this test passes even if
+    // stepAttract stops aging debris. It stays to document the non-qualifying
+    // transition; the genuine attract-aging pins live in the describe block below.
     let s = playing(4242, { lives: 1, ship: shipAt(CENTER), rocks: [rockAt(CENTER)] })
     s = stepGame(s, NO_INPUT, DT)
     expect(s.mode).toBe('gameover')
     expect(s.gameOver?.qualifies).toBe(false) // sanity: takes the timed, non-qualifying path
 
-    const ticksToReachAttract = Math.ceil((3 + 0.5) / DT) // past GAME_OVER_DISPLAY_S with margin
+    const ticksToReachAttract = Math.ceil((GAME_OVER_DISPLAY_S + 0.5) / DT) // past GAME_OVER_DISPLAY_S with margin
     for (let i = 0; i < ticksToReachAttract; i++) {
       s = stepGame(s, NO_INPUT, DT)
     }
     expect(s.mode).toBe('attract') // sanity: the card really did end
     expect(s.shipDebris).toHaveLength(0) // no frozen wreckage carried into attract
+  })
+})
+
+// A2-5 (Reviewer H-1, rework round 2): the "keeps fading into attract mode too"
+// test above is a VACUOUS guard for the stepAttract aging — it routes through
+// the non-qualifying 3s-timed gameover path, where the gameover pipeline always
+// fades debris to nothing (DEBRIS_LIFETIME_S 1.5s < GAME_OVER_DISPLAY_S 3s)
+// BEFORE attract is ever reached, so it stays green even with stepAttract's
+// aging reverted (mutation-verified by the Reviewer: reverting it left the whole
+// suite green). The three tests below pin stepAttract's aging FOR REAL — each was
+// mutation-verified during test design to go RED when the stepAttract aging is
+// reverted (see TEA Assessment, rework round 2). The stepAttract path is reachable
+// in real play: a qualifying high score confirmed fast returns to attract with
+// live wreckage (third test), and only stepAttract keeps it fading from there.
+describe('stepGame — attract mode itself ages ship debris (Reviewer H-1 pin, rework 2)', () => {
+  it('drifts and fades a live debris segment on a single attract tick', () => {
+    // In attract, stepAttract is the ONLY thing that can touch shipDebris (no
+    // death edge, no gameover pipeline), so this isolates the aging line under
+    // test: frozen debris keeps its exact life and position; aged debris moves.
+    const seg = segment({ p1: { x: 1000, y: 1000 }, p2: { x: 1040, y: 1000 }, vel: { x: 6, y: -3 }, life: 1 })
+    const s0: GameState = { ...initialState(4242), mode: 'attract', shipDebris: [seg] }
+    const out = stepGame(s0, NO_INPUT, DT)
+    expect(out.mode).toBe('attract') // sanity: no start pressed, still attract
+    expect(out.shipDebris).toHaveLength(1)
+    // fade: life strictly decremented by exactly dt (frozen debris keeps life: 1)
+    expect(out.shipDebris[0].life).toBeCloseTo(1 - DT, 9)
+    // drift: both endpoints translated by vel * dt*60 (frozen debris would not move)
+    const frames = DT * 60
+    expectVec(out.shipDebris[0].p1, { x: 1000 + 6 * frames, y: 1000 - 3 * frames })
+    expectVec(out.shipDebris[0].p2, { x: 1040 + 6 * frames, y: 1000 - 3 * frames })
+  })
+
+  it('clears ship debris within DEBRIS_LIFETIME_S while idling in attract', () => {
+    let s: GameState = { ...initialState(4242), mode: 'attract', shipDebris: [segment({ life: DEBRIS_LIFETIME_S })] }
+    const ticks = Math.ceil(DEBRIS_LIFETIME_S / DT) + 10
+    for (let i = 0; i < ticks; i++) s = stepGame(s, NO_INPUT, DT)
+    expect(s.mode).toBe('attract')
+    expect(s.shipDebris).toHaveLength(0) // frozen-in-attract wreckage would sit here forever
+  })
+
+  it('keeps fading wreckage after a fast qualifying high-score confirm re-enters attract', () => {
+    // The REACHABLE real path round 1 missed: a qualifying score + 3 initials +
+    // a start press returns to attract THIS tick with NO minimum-display gate
+    // (stepGameOver qualifying-confirm branch), so wreckage enters attract still
+    // alive — and only stepAttract keeps it fading. Pins both the confirm-tick
+    // aging (stepGameOver base) AND the subsequent attract aging (Reviewer L-1 + H-1).
+    const liveSeg = segment({ p1: { x: 2000, y: 2000 }, p2: { x: 2040, y: 2000 }, vel: { x: 4, y: 0 }, life: 1 })
+    const s0: GameState = {
+      ...initialState(4242),
+      mode: 'gameover',
+      gameOver: { qualifies: true, confirmed: false, initials: 'AAA', displayTimer: GAME_OVER_DISPLAY_S },
+      shipDebris: [liveSeg],
+      startPrev: false,
+    }
+    // start pressed with 3 initials -> confirm returns to attract this tick
+    const confirmed = stepGame(s0, { ...NO_INPUT, start: true }, DT)
+    expect(confirmed.mode).toBe('attract') // sanity: confirmed into attract
+    expect(confirmed.shipDebris).toHaveLength(1) // wreckage survived the transition...
+    expect(confirmed.shipDebris[0].life).toBeCloseTo(1 - DT, 9) // ...and aged one tick on the confirm (stepGameOver base)
+
+    // now idle in attract: it must KEEP fading to nothing (stepAttract)
+    let s = confirmed
+    const ticks = Math.ceil(DEBRIS_LIFETIME_S / DT) + 10
+    for (let i = 0; i < ticks; i++) s = stepGame(s, NO_INPUT, DT)
+    expect(s.mode).toBe('attract')
+    expect(s.shipDebris).toHaveLength(0) // frozen-in-attract wreckage would never clear
   })
 })
 
