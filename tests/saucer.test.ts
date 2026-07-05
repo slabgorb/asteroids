@@ -591,3 +591,61 @@ describe('core/saucer.ts source hygiene (determinism + type safety) (rule)', () 
     expect(/\bas\s+any\b/.test(src())).toBe(false)
   })
 })
+
+// ---------------------------------------------------------------------------
+// A2-9: the saucer's ÷4 update cadence — "spam bullets and turn quickly".
+//
+// Confirmed in live playtest: the large saucer fires too often and crosses /
+// weaves too fast. Same ÷4 root cause as the shot-timer fix (bullet.test.ts) —
+// the rev-4 disassembly gates the ENTIRE saucer update to every 4th frame:
+//
+//     UpdateScr:
+//     L6B93: lda FrameTimerLo   ; Update saucers only every 4th frame.
+//     L6B95: and #$03           ; Is this the 4th frame?
+//     L6B97: beq ChkScrExplode  ; If so, continue processing.
+//
+// so both its motion and its fire timer advance at 1/4 the frame rate:
+//   - FIRE: ScrTimer reloads to $0A = 10 (L6C54) but decrements INSIDE that gate
+//     → a shot every 10 x 4 = 40 frames, not 10. The port fired every 10 frames.
+//   - MOVEMENT: position integrates inside the gate → effective speed is 1/4 the
+//     per-frame drift. The port moved every frame → 4x too fast crossing + weave.
+//   - COURSE change stays 128 frames (FrameTimerLo bit 7, L6C34) — already right.
+//
+// Fix as continuous-dt equivalents (base magnitudes remain provisional per A-17,
+// but the ÷4 cadence is ROM-confirmed and drives these):
+//   - SAUCER_FIRE_INTERVAL: 10/60 -> 40/60 s   (fires every 40 frames)
+//   - SAUCER_SPEED:         16 -> 4 lo-units/frame (16 per-4-frame drift / 4)
+// ---------------------------------------------------------------------------
+describe('saucer ÷4 update cadence (A2-9)', () => {
+  it('fires on the ROM 40-frame cadence (ScrTimer $0A=10 x the every-4th-frame gate), not 10', () => {
+    expect(Math.round(SAUCER_FIRE_INTERVAL / DT)).toBe(40)
+  })
+
+  it('spaces successive saucer shots ~40 frames apart — no bullet spam', () => {
+    // Observable spam check: record the frames at which a new saucer shot appears
+    // and assert the first gap is a full ROM cadence, not the pre-fix ~10 frames.
+    const start = spawnLiveSaucer(1979)
+    requireSaucer(start)
+    let s = start
+    let prevCount = start.bullets.filter((b) => b.owner === 'saucer').length
+    const fireFrames: number[] = []
+    for (let i = 1; i <= 200 && fireFrames.length < 2; i++) {
+      s = stepGame(s, NO_INPUT, DT)
+      if (s.saucer === null) break
+      const count = s.bullets.filter((b) => b.owner === 'saucer').length
+      if (count > prevCount) fireFrames.push(i)
+      prevCount = count
+    }
+    expect(fireFrames.length).toBeGreaterThanOrEqual(2) // it did fire repeatedly
+    const gap = fireFrames[1] - fireFrames[0]
+    expect(gap).toBeGreaterThan(30) // ROM ~40; the pre-fix ~10 spam fails this
+  })
+
+  it('crosses and weaves at 1/4 the pre-fix speed (every-4th-frame movement gate)', () => {
+    // SAUCER_SPEED is the per-frame drift; the ROM applies it every 4th frame, so
+    // the continuous port value is the provisional 16 drift / 4 = 4. The magnitude
+    // stays provisional (A-17) but the ÷4 is ROM-confirmed. The pre-fix 16 crossed
+    // the field ~4x too fast — the "turns quickly" playtest report.
+    expect(SAUCER_SPEED).toBe(4)
+  })
+})
