@@ -5,9 +5,11 @@
 // Firing extends A-3's ship model. A bullet is spawned at (approximately) the
 // ship, launched along the ship's heading (`dir`) at a fixed muzzle speed, and
 // inherits the ship's current velocity (momentum). It flies straight — no
-// thrust, no drag — wrapping the toroidal world until a finite lifetime
-// counter runs out and it is removed. At most four player bullets may exist at
-// once, and firing is edge-triggered (one shot per fresh press — no auto-fire).
+// thrust, no drag — until a finite lifetime counter runs out OR it reaches the
+// screen edge (1979 shots do NOT wrap the toroidal field — that's Asteroids
+// DELUXE — they have a limited range and vanish at the edge, which is why you
+// cannot shoot yourself), whereupon it is removed. At most four player bullets
+// may exist at once, and firing is edge-triggered (one shot per fresh press).
 //
 // ROM references (rev-4 disassembly, https://6502disassembly.com/va-asteroids/
 // Asteroids.html; the reference/ quarry is absent from this checkout — see
@@ -214,11 +216,14 @@ describe('lifetime & movement (AC-4)', () => {
     expect(p1.y - p0.y).toBeCloseTo(v.y, 3)
   })
 
-  it('lives for its (effective) lifetime then is removed', () => {
+  it('lives for its (effective) lifetime then is removed by the timer', () => {
     // The shot's real lifetime is EFFECTIVE_LIFETIME frames (the raw timer seed
     // decremented only every 4th frame — see the A2-9 block below), not the raw
-    // BULLET_LIFETIME_FRAMES counter. Present safely before expiry...
-    const spawned = fireOnce(playing(1, { dir: 0 }))
+    // BULLET_LIFETIME_FRAMES counter. Fire from near the LEFT seam heading +x so
+    // the full ~7992-lo-unit flight stays inside the 8192-wide field and the shot
+    // dies by TIMER, not by reaching the edge (shots no longer wrap). Present
+    // safely before expiry...
+    const spawned = fireOnce(playing(1, { pos: { x: 50, y: WORLD_H / 2 }, vel: { x: 0, y: 0 }, dir: 0 }))
     expect(spawned.bullets).toHaveLength(1)
     const midlife = stepN(spawned, NO_INPUT, EFFECTIVE_LIFETIME - 2)
     expect(midlife.bullets).toHaveLength(1)
@@ -227,25 +232,32 @@ describe('lifetime & movement (AC-4)', () => {
     expect(expired.bullets).toHaveLength(0)
   })
 
-  it('keeps every live bullet inside the world and wraps toroidally', () => {
-    // Ship one lo-unit from the right seam, facing +x: the bullet crosses the
-    // x seam almost immediately. Track a hard wrap (a jump > half the world)
-    // and assert every position stays in bounds. Robust for any muzzle > 2.
-    let s = fireOnce(playing(1, { pos: { x: WORLD_W - 2, y: WORLD_H / 2 }, vel: { x: 0, y: 0 }, dir: 0 }))
-    let prev = s.bullets[0].pos.x
-    let wraps = 0
-    for (let i = 0; i < 6; i++) {
-      s = stepGame(s, NO_INPUT, DT)
-      if (s.bullets.length === 0) break
-      const { x, y } = s.bullets[0].pos
-      expect(x).toBeGreaterThanOrEqual(0)
-      expect(x).toBeLessThan(WORLD_W)
-      expect(y).toBeGreaterThanOrEqual(0)
-      expect(y).toBeLessThan(WORLD_H)
-      if (Math.abs(x - prev) > WORLD_W / 2) wraps++
-      prev = x
-    }
-    expect(wraps).toBeGreaterThanOrEqual(1)
+  it('does NOT wrap — a shot leaving the playfield is removed, not folded to the far side', () => {
+    // 1979 Asteroids shots have a limited range and vanish at the screen edge —
+    // they do NOT reappear on the opposite side (that is Asteroids DELUXE, and it
+    // is why you cannot shoot yourself). Ship two lo-units from the right seam,
+    // facing +x: the first step carries the shot past the edge, so it must be
+    // GONE — never re-seated near x≈109 on the left.
+    const nearSeam = fireOnce(playing(1, { pos: { x: WORLD_W - 2, y: WORLD_H / 2 }, vel: { x: 0, y: 0 }, dir: 0 }))
+    expect(nearSeam.bullets).toHaveLength(1) // spawned at the ship, still on-field
+    const crossed = stepGame(nearSeam, NO_INPUT, DT)
+    expect(crossed.bullets).toHaveLength(0) // removed at the edge, not wrapped
+  })
+
+  it('removes player and saucer shots alike at the edge — the no-wrap rule is owner-agnostic', () => {
+    // The edge-death lives in the shared advance() path, so both owners obey it.
+    // Seed one player + one saucer shot two units from the top-right corner,
+    // each heading out past both seams next step; both must be dropped together.
+    const restShip: Ship = { pos: { x: 0, y: 0 }, vel: { x: 0, y: 0 }, dir: 0, visible: true }
+    const mk = (owner: 'player' | 'saucer'): Bullet => ({
+      pos: { x: WORLD_W - 2, y: WORLD_H - 2 },
+      vel: { x: 50, y: 50 }, // exits both edges on the next step
+      life: BULLET_LIFETIME_FRAMES,
+      owner,
+    })
+    // firePrev=true + fire=false → no rising edge, so nothing new spawns.
+    const stepped = stepBullets([mk('player'), mk('saucer')], restShip, true, NO_INPUT, DT).bullets
+    expect(stepped).toHaveLength(0) // neither owner wraps back onto the field
   })
 })
 
@@ -376,32 +388,35 @@ describe('shot range: ROM timer cadence (A2-9)', () => {
   it('keeps a player shot airborne far past the old 18-frame death (the exact bug)', () => {
     // Pre-fix, the shot was removed at 18 frames. It must now survive well beyond
     // that — checked at 30 and 60 frames, both inside the true 72-frame life.
-    // This is the assertion that fails loudest against the shipped bug.
-    const spawned = fireOnce(playing(1, { dir: 0 }))
+    // Fire from near the LEFT seam heading +x so the shot stays on-field the whole
+    // time (shots die at the edge now, so a centre shot would leave the screen
+    // first and mask the timer). This is the assertion that fails loudest against
+    // the old 18-frame bug.
+    const spawned = fireOnce(playing(1, { pos: { x: 50, y: WORLD_H / 2 }, vel: { x: 0, y: 0 }, dir: 0 }))
     expect(spawned.bullets).toHaveLength(1)
     expect(stepN(spawned, NO_INPUT, 30).bullets).toHaveLength(1)
     expect(stepN(spawned, NO_INPUT, 60).bullets).toHaveLength(1)
   })
 
-  it('travels nearly the full screen width at a cardinal heading (reaches distant targets)', () => {
-    // Fire +x from world centre, at rest, and track UNWRAPPED x-travel across
-    // most of the shot's life. Pre-fix travel was ~18 x 111 = 1998 lo-units
-    // (a quarter screen); the fix must carry it across most of the playfield.
-    const ship = { pos: { x: WORLD_W / 2, y: WORLD_H / 2 }, vel: { x: 0, y: 0 }, dir: 0 }
+  it('travels most of the screen width before it expires (reaches distant targets)', () => {
+    // Fire +x from near the LEFT seam, at rest, and track x-travel across most of
+    // the shot's life. Pre-fix travel was ~18 x 111 = 1998 lo-units (a quarter
+    // screen); the fix must carry it across most of the playfield. Fired from the
+    // left so the ~7992-lo-unit flight stays on-field and dies by TIMER, not by
+    // reaching the edge — with no wrap there is no seam to unwrap.
+    const ship = { pos: { x: 50, y: WORLD_H / 2 }, vel: { x: 0, y: 0 }, dir: 0 }
     let s = fireOnce(playing(1, ship))
     const v = s.bullets[0].vel.x
     expect(v).toBeGreaterThan(0) // +x heading
 
-    const FRAMES = 64 // safely inside the 72-frame life
+    const FRAMES = 64 // safely inside the 72-frame life AND inside the field
     let prev = s.bullets[0].pos.x
     let travel = 0
     for (let i = 0; i < FRAMES; i++) {
       s = stepGame(s, NO_INPUT, DT)
-      expect(s.bullets).toHaveLength(1) // alive the whole way
+      expect(s.bullets).toHaveLength(1) // alive the whole way (no edge death yet)
       const x = s.bullets[0].pos.x
-      let dx = x - prev
-      if (dx < -WORLD_W / 2) dx += WORLD_W // unwrap a forward seam crossing
-      travel += dx
+      travel += x - prev
       prev = x
     }
     // Constant-velocity flight for the full window (no drag on a shot)...

@@ -1,7 +1,8 @@
 // src/core/bullet.ts
 //
 // A-4: player firing — bullet spawn, muzzle velocity (with inherited ship
-// momentum), finite lifetime, toroidal flight, and the max-4-shots cap. Pure:
+// momentum), finite lifetime, straight flight that dies at the screen edge
+// (1979 shots do NOT wrap), and the max-4-shots cap. Pure:
 // no DOM, no wall-clock or entropy globals; time enters only as `dt`, and
 // firing consumes no randomness.
 //
@@ -47,12 +48,6 @@ function clampMuzzle(v: number): number {
   return Math.min(BULLET_SPEED, Math.max(-BULLET_SPEED, v))
 }
 
-/** Toroidal wrap into [0, size) on both axes (UpdateObjPos $6fc7), matching the
- * ship's playfield wrap. */
-function wrap(v: number, size: number): number {
-  return ((v % size) + size) % size
-}
-
 /** A shot's per-axis muzzle velocity: the thrust-direction sine amplitude taken
  * at 3/2 (the ROM adds the heading value plus half of it again, BulletSlotFound
  * $6d0c–$6d2a) and clamped to ±BULLET_SPEED. At a cardinal heading this lands at
@@ -62,22 +57,26 @@ function muzzleAxis(headingVal: number): number {
   return clampMuzzle(headingVal + headingVal / 2)
 }
 
-/** Advance every live bullet one step: integrate position by velocity with
- * toroidal wrap on both axes, decrement the lifetime counter once per
- * SHOT_TIMER_PERIOD_FRAMES frames (the ROM's every-4th-frame timer DEC at L738F,
- * while position integrates every frame), and drop shots whose life has run out.
- * Bullets fly straight — no thrust, no drag — so their velocity is constant.
- * Returns fresh bullet objects (no aliasing of the input). */
+/** Advance every live bullet one step: integrate position by velocity, decrement
+ * the lifetime counter once per SHOT_TIMER_PERIOD_FRAMES frames (the ROM's
+ * every-4th-frame timer DEC at L738F, while position integrates every frame), and
+ * drop shots whose life has run out OR that have flown off the playfield edge.
+ * Unlike the ship and rocks, 1979 Asteroids shots do NOT wrap the toroidal field
+ * — they have a limited range and vanish at the screen edge (which is why you
+ * cannot shoot yourself; Asteroids DELUXE later made shots wrap, this game does
+ * not). Bullets fly straight — no thrust, no drag — so their velocity is
+ * constant. Returns fresh bullet objects (no aliasing of the input). */
 function advance(bullets: readonly Bullet[], frames: number): Bullet[] {
   const out: Bullet[] = []
   for (const b of bullets) {
     const life = b.life - frames / SHOT_TIMER_PERIOD_FRAMES
     if (life <= 0) continue
+    const x = b.pos.x + b.vel.x * frames
+    const y = b.pos.y + b.vel.y * frames
+    // Shots die at the edge — no toroidal wrap (see doc comment above).
+    if (x < 0 || x >= WORLD_W || y < 0 || y >= WORLD_H) continue
     out.push({
-      pos: {
-        x: wrap(b.pos.x + b.vel.x * frames, WORLD_W),
-        y: wrap(b.pos.y + b.vel.y * frames, WORLD_H),
-      },
+      pos: { x, y },
       vel: { x: b.vel.x, y: b.vel.y },
       life,
       owner: b.owner,

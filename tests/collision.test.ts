@@ -276,9 +276,11 @@ describe('stepGame — collision is toroidal (wraps across the seam)', () => {
   })
 })
 
-describe('stepGame — positions stay wrapped onto the toroidal field (AC-5, regression)', () => {
-  // Position wrap already ships (bullet.ts `advance`, rocks.ts `updateRock`);
-  // these guard that stepGame keeps folding bullets and rocks on-field.
+describe('stepGame — rocks wrap the toroidal field; shots die at the edge (AC-5, regression)', () => {
+  // AC-5's toroidal wrap applies to the ship and rocks (rocks.ts `updateRock`).
+  // Shots are the deliberate exception: 1979 Asteroids gives them a limited range
+  // and vanishes them at the screen edge (bullet.ts `advance`) — they do NOT wrap
+  // (that's Asteroids DELUXE, and it's why you cannot shoot yourself).
   it('wraps a rock drifting past the right edge back to the left', () => {
     const rock = rockAt({ x: WORLD_W - 4, y: 3000 }, 'large', { velocity: { x: 8, y: 0 } })
     const s1 = stepGame(playing(4242, { rocks: [rock] }), NO_INPUT, DT)
@@ -287,12 +289,11 @@ describe('stepGame — positions stay wrapped onto the toroidal field (AC-5, reg
     expect(s1.rocks[0].pos.x).toBeCloseTo(4, 6) // (WORLD_W-4)+8 → wraps to 4
   })
 
-  it('wraps a bullet flying past the bottom edge back to the top', () => {
+  it('removes a bullet flying past the bottom edge — it does NOT wrap back to the top', () => {
     const bullet = bulletAt({ x: 4000, y: WORLD_H - 5 }, { vel: { x: 0, y: 10 } })
     const s1 = stepGame(playing(4242, { bullets: [bullet] }), NO_INPUT, DT)
-    expect(s1.bullets[0].pos.y).toBeGreaterThanOrEqual(0)
-    expect(s1.bullets[0].pos.y).toBeLessThan(WORLD_H)
-    expect(s1.bullets[0].pos.y).toBeCloseTo(5, 6) // (WORLD_H-5)+10 → wraps to 5
+    // (WORLD_H-5)+10 leaves the field → the shot is gone, never re-seated at y≈5.
+    expect(s1.bullets).toHaveLength(0)
   })
 })
 
