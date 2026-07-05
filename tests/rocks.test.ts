@@ -396,7 +396,11 @@ describe('stepGame drifts rocks each tick in play (AC-6)', () => {
   it('leaves the drift consuming no randomness (rocks move by pure translation)', () => {
     // Rocks integrate deterministically with no rng draw, so the seed is
     // untouched per tick — spawn is the only rng consumer (A-10 wave director).
-    const s0 = playing(123, [rock({ velocity: { x: 5, y: -2 } })])
+    // Position clear of the default ship spawn (rock()'s own default pos IS
+    // the ship spawn point, {4096, 3072}) — A2-5's ship-death debris also
+    // draws rng, so a coincidental ram here would confound this guard with a
+    // different rng consumer than the one it means to test.
+    const s0 = playing(123, [rock({ pos: { x: 1000, y: 1000 }, velocity: { x: 5, y: -2 } })])
     const s1 = stepGame(s0, NO_INPUT, DT)
     expect(s1.rng.seed).toBe(s0.rng.seed)
   })

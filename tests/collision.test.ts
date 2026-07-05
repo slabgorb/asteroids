@@ -40,6 +40,7 @@ import {
 } from '../src/core/state'
 import { NO_INPUT } from '../src/core/input'
 import { splitRock, ROCK_HITBOX } from '../src/core/rocks'
+import { breakShip } from '../src/core/shipDebris'
 import { createRng } from '../src/core/rng'
 
 const DT = 1 / 60
@@ -202,11 +203,18 @@ describe('stepGame — ship-vs-rock collision destroys the ship (AC-4)', () => {
   })
 
   it('does NOT split or destroy the rock the ship rammed (rock is unaffected)', () => {
-    const s0 = playing(4242, { ship: shipAt(CENTER), rocks: [rockAt(CENTER, 'large')], bullets: [] })
+    const ship = shipAt(CENTER)
+    const s0 = playing(4242, { ship, rocks: [rockAt(CENTER, 'large')], bullets: [] })
     const s1 = stepGame(s0, NO_INPUT, DT)
     expect(s1.rocks).toHaveLength(1)
     expect(s1.rocks[0].size).toBe('large')
-    expect(s1.rng.seed).toBe(s0.rng.seed) // no split → no rng draw
+    // A2-5: the ship's death now spawns breakup debris, which legitimately
+    // consumes rng (breakShip) — reproduced independently, the same "no
+    // split → no [EXTRA] rng draw" guard this pinned before the debris
+    // feature existed.
+    const clone = createRng(4242)
+    breakShip(ship, clone)
+    expect(s1.rng.seed).toBe(clone.seed)
   })
 
   it('destroyed state is sticky: it survives a later step with no overlap', () => {

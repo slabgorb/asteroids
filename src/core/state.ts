@@ -66,6 +66,18 @@ export interface Bullet {
   owner: 'player' | 'saucer'
 }
 
+/** A2-5: one drifting, fading piece of the ship's silhouette, spawned when the
+ * ship is destroyed — one per rendered polygon edge (shipShape.ts). `p1`/`p2`
+ * are the segment's two endpoints (world-space); `vel` is world-units per 60
+ * Hz frame, the same unit as Ship.vel/Rock.velocity; `life` is remaining
+ * seconds before the piece is dropped. */
+export interface ShipDebrisSegment {
+  p1: Vec2
+  p2: Vec2
+  vel: Vec2
+  life: number
+}
+
 /** A saucer's size tier. The LARGE variant (A-11) crosses and fires at random
  * headings; the SMALL variant (A-12) aims at the ship with an accuracy that
  * ramps up with the score. A-13 scores the two differently (200 vs 990/1000)
@@ -133,6 +145,10 @@ export interface GameState {
   ship: Ship
   rocks: Rock[]
   bullets: Bullet[]
+  /** A2-5: the ship's breakup debris, live between destruction and full fade.
+   * Purely cosmetic — never consulted by collision or the respawn clear-zone
+   * check (lives.ts isCenterClear). */
+  shipDebris: ShipDebrisSegment[]
   saucer: Saucer | null
   /** Previous frame's fire-button state — the shift-register debounce that makes
    * firing edge-triggered (A-4, ShipBulletSR $63): a shot spawns only on a fresh
@@ -214,6 +230,8 @@ export function initialState(seed: number = DEFAULT_SEED): GameState {
     },
     rocks: [],
     bullets: [],
+    // No ship has died yet at boot (A2-5).
+    shipDebris: [],
     saucer: null,
     // Fire not held at boot, so the very first press reads as a rising edge.
     firePrev: false,

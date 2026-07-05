@@ -17,6 +17,7 @@ import type { Rng } from './rng'
 import { stepShip, SHIP_HITBOX } from './ship'
 import { stepBullets } from './bullet'
 import { updateRocks, splitRock, ROCK_HITBOX } from './rocks'
+import { breakShip, updateShipDebris } from './shipDebris'
 import { updateWaveDirector } from './waves'
 import { updateSpawnDirector, stepSaucer, SAUCER_HITBOX, SAUCER_ROCK_COLLISION_ENABLED } from './saucer'
 import { applyScore, addScore, SAUCER_SCORE } from './score'
@@ -278,6 +279,7 @@ export function stepGame(inState: GameState, input: Input, dt: number): GameStat
   if (thrustFallingEdge) events.push({ type: 'thrust-stop' })
 
   let rocks = updateRocks(state.rocks, dt, WORLD_BOUNDS)
+  let shipDebris = updateShipDebris(state.shipDebris, dt)
   let liveBullets: Bullet[] = bullets
   let score = state.score
   let lives = state.lives
@@ -388,6 +390,10 @@ export function stepGame(inState: GameState, input: Input, dt: number): GameStat
   // instead of dying silently.
   if (!wasDeadBefore && shipDestroyed) {
     events.push({ type: 'explosion', source: 'ship' })
+    // A2-5: the ship's rendered silhouette fractures into its 4 polygon edges
+    // as independent debris — the visual twin of the explosion event above,
+    // gated on the same edge (fires even on the last life, like the event).
+    shipDebris = [...shipDebris, ...breakShip(ship, rng)]
     // A dead ship's engine goes silent (the intent behind the alive-gated thrust
     // events above). But the thrust-stop falling edge can never fire once dead,
     // so a ship that dies with thrust ENGAGED would leave its loop humming
@@ -411,6 +417,7 @@ export function stepGame(inState: GameState, input: Input, dt: number): GameStat
     ship: revealedShip,
     rocks,
     bullets: liveBullets,
+    shipDebris,
     saucer,
     score,
     lives,

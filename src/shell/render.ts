@@ -25,8 +25,11 @@ import {
   type Rock,
   type Bullet,
   type Saucer,
+  type ShipDebrisSegment,
 } from '../core/state'
 import { ROCK_HITBOX } from '../core/rocks'
+import { shipHeading, shipVertices, SHIP_TAIL } from '../core/shipShape'
+import { DEBRIS_LIFETIME_S } from '../core/shipDebris'
 import { formatScore } from '../core/score'
 import type { Input } from '../core/input'
 import { marginRects, fitScale } from './margin'
@@ -113,12 +116,10 @@ const SAUCER_HULL_SHOULDER = 56
 const SAUCER_CANOPY_HALF_W = 30
 const SAUCER_CANOPY_TOP = 78
 
-// Ship silhouette dimensions, in world lo-units (~200 tip-to-tail → ~25px on a
-// 1024-wide field). Provisional — see file header.
-const NOSE = 130
-const TAIL = 70
-const HALF_WIDTH = 75
-const NOTCH = 35
+// Ship hull dimensions (NOSE/TAIL/HALF_WIDTH/NOTCH) live in core/shipShape.ts
+// now — A2-5's core/shipDebris.ts needs the SAME geometry to fracture the
+// ship that this file renders, so it is hoisted to one shared function
+// rather than two independently-tuned copies (see shipShape.ts header).
 const FLAME_LEN = 90
 const FLAME_HALF = 32
 
@@ -132,16 +133,6 @@ interface View {
  *  world +y draws toward the top of the screen. */
 function toScreen(x: number, y: number, view: View): [number, number] {
   return [view.w / 2 + (x - WORLD_W / 2) * view.scale, view.h / 2 - (y - WORLD_H / 2) * view.scale]
-}
-
-/** Heading basis from `dir` (256-unit circle): forward unit vector (fx, fy) and
- *  its +90° perpendicular (px, py). At dir 64 forward is (0, 1) = world-up,
- *  matching the flight model (ship.ts thrusts +y at dir 64). */
-function heading(dir: number): { fx: number; fy: number; px: number; py: number } {
-  const theta = (dir / 256) * Math.PI * 2
-  const fx = Math.cos(theta)
-  const fy = Math.sin(theta)
-  return { fx, fy, px: -fy, py: fx }
 }
 
 /** Stroke a world-space polyline as a glowing vector shape. */
@@ -167,17 +158,17 @@ function strokePoly(
 }
 
 /** The player ship: nose forward along the heading, two swept-back wings, and a
- *  shallow centre notch on the tail. */
+ *  shallow centre notch on the tail. Vertices come from core/shipShape.ts — the
+ *  SAME geometry core/shipDebris.ts fractures on death, by construction. */
 function drawShip(ctx: CanvasRenderingContext2D, ship: Ship, view: View): void {
-  const { fx, fy, px, py } = heading(ship.dir)
-  const { x, y } = ship.pos
+  const [nose, rightWing, notch, leftWing] = shipVertices(ship)
   strokePoly(
     ctx,
     [
-      [x + fx * NOSE, y + fy * NOSE], // nose
-      [x - fx * TAIL + px * HALF_WIDTH, y - fy * TAIL + py * HALF_WIDTH], // right wing
-      [x - fx * NOTCH, y - fy * NOTCH], // tail notch
-      [x - fx * TAIL - px * HALF_WIDTH, y - fy * TAIL - py * HALF_WIDTH], // left wing
+      [nose.x, nose.y],
+      [rightWing.x, rightWing.y],
+      [notch.x, notch.y],
+      [leftWing.x, leftWing.y],
     ],
     view,
     SHIP_COLOR,
@@ -188,19 +179,45 @@ function drawShip(ctx: CanvasRenderingContext2D, ship: Ship, view: View): void {
 /** The thrust flame: a wedge trailing aft (opposite the nose), drawn only while
  *  thrust is held. Static shape — flicker is an A-19 feel concern. */
 function drawFlame(ctx: CanvasRenderingContext2D, ship: Ship, view: View): void {
-  const { fx, fy, px, py } = heading(ship.dir)
+  const { fx, fy, px, py } = shipHeading(ship.dir)
   const { x, y } = ship.pos
   strokePoly(
     ctx,
     [
-      [x - fx * TAIL + px * FLAME_HALF, y - fy * TAIL + py * FLAME_HALF], // aft-right
-      [x - fx * (TAIL + FLAME_LEN), y - fy * (TAIL + FLAME_LEN)], // flame tip
-      [x - fx * TAIL - px * FLAME_HALF, y - fy * TAIL - py * FLAME_HALF], // aft-left
+      [x - fx * SHIP_TAIL + px * FLAME_HALF, y - fy * SHIP_TAIL + py * FLAME_HALF], // aft-right
+      [x - fx * (SHIP_TAIL + FLAME_LEN), y - fy * (SHIP_TAIL + FLAME_LEN)], // flame tip
+      [x - fx * SHIP_TAIL - px * FLAME_HALF, y - fy * SHIP_TAIL - py * FLAME_HALF], // aft-left
     ],
     view,
     FLAME_COLOR,
     false,
   )
+}
+
+/** The ship's breakup debris (A2-5): each surviving segment as an independent
+ *  glowing line, alpha-faded by its remaining life fraction so pieces fade out
+ *  rather than popping away. */
+function drawShipDebris(
+  ctx: CanvasRenderingContext2D,
+  segments: readonly ShipDebrisSegment[],
+  view: View,
+): void {
+  for (const seg of segments) {
+    const alpha = Math.max(0, Math.min(1, seg.life / DEBRIS_LIFETIME_S))
+    const [sx1, sy1] = toScreen(seg.p1.x, seg.p1.y, view)
+    const [sx2, sy2] = toScreen(seg.p2.x, seg.p2.y, view)
+    ctx.save()
+    ctx.globalAlpha = alpha
+    ctx.strokeStyle = SHIP_COLOR
+    ctx.shadowColor = SHIP_COLOR
+    ctx.shadowBlur = GLOW_BLUR
+    ctx.lineWidth = LINE_WIDTH
+    ctx.beginPath()
+    ctx.moveTo(sx1, sy1)
+    ctx.lineTo(sx2, sy2)
+    ctx.stroke()
+    ctx.restore()
+  }
 }
 
 /** One asteroid: its fixed shapeVariant silhouette scaled to its size tier,
@@ -397,6 +414,7 @@ export function render(
   for (const rock of state.rocks) drawRock(ctx, rock, view)
   if (state.saucer) drawSaucer(ctx, state.saucer, view)
   for (const bullet of state.bullets) drawBullet(ctx, bullet, view)
+  drawShipDebris(ctx, state.shipDebris, view)
   // A-14: `ship.visible` is false while a hyperspace jump is in flight — the ship
   // (and its flame) vanish for the reappearance window, then pop back at the new
   // spot. Skipping the draw here is the whole visual of a hyperspace jump.
