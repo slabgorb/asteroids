@@ -234,7 +234,14 @@ export function stepGame(inState: GameState, input: Input, dt: number): GameStat
   // the post-jump result; capture the PRE-jump death latch for the respawn gate,
   // so a ship killed by a failed jump still spends one full tick dead before
   // A-15 revives it — the same one-tick-dead rule as a collision death.
+  //
+  // A2-3 (Reviewer H-1): a failed jump's death runs THROUGH handleShipDeath
+  // right here, which on the last life already nulls `state.saucer` as a side
+  // effect — so `incomingSaucer` must be captured BEFORE this call, the same
+  // way `wasDeadBefore` is, or withSirenEdge's incoming/final comparison below
+  // sees the saucer already gone on both sides and never fires the stop.
   const wasDeadBefore = state.shipDestroyed
+  const incomingSaucer = state.saucer
   state = triggerHyperspace(state, input)
 
   // Clone the RNG so this step never mutates the caller's state — the one
@@ -444,7 +451,7 @@ export function stepGame(inState: GameState, input: Input, dt: number): GameStat
   // itself, so draws thread forward without touching the caller's rng. Runs BEFORE
   // the wave director, whose "field clear" gate includes `saucer === null` — so a
   // live saucer holds off the next wave (A-10 forward-compat gate).
-  const withSaucer = withSirenEdge(state.saucer, updateSpawnDirector(stepSaucer(stepped, dt), dt))
+  const withSaucer = withSirenEdge(incomingSaucer, updateSpawnDirector(stepSaucer(stepped, dt), dt))
 
   // The wave director spawns the next wave once the field is clear (play only).
   // It runs on the post-step state and clones the rng itself, so any spawn draws

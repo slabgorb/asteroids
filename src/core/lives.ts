@@ -78,6 +78,13 @@ export function handleShipDeath(state: GameState): GameState {
       lives: 0,
       shipDestroyed: true,
       mode: 'gameover',
+      // A2-3: the run end takes any live saucer with it. Once mode leaves
+      // 'playing', stepSaucer/updateSpawnDirector mode-gate to no-ops and can
+      // never remove it — clearing it HERE is what makes sim.ts's
+      // withSirenEdge see the saucer leave on this final frame and emit the
+      // saucer-siren-stop that silences the shell's siren loop (and stops the
+      // renderer painting a frozen saucer under the GAME OVER card).
+      saucer: null,
       gameOver: {
         qualifies: qualifiesForHighScore(state.highScoreTable, state.score),
         initials: '',

@@ -32,6 +32,8 @@ import {
 } from '../src/core/state'
 import { NO_INPUT } from '../src/core/input'
 import type { GameEvent } from '../src/core/events'
+import { HYPERSPACE_DEATH_CHANCE } from '../src/core/hyperspace'
+import { nextFloat } from '../src/core/rng'
 
 const DT = 1 / 60
 
@@ -41,6 +43,21 @@ const CENTER: Vec2 = { x: 2000, y: 2000 }
 
 const FIRE = { ...NO_INPUT, fire: true }
 const THRUST = { ...NO_INPUT, thrust: true }
+const HYPER = { ...NO_INPUT, hyperspace: true }
+
+/** Peek what the first RNG draw for `seed` yields, without consuming it — the
+ * same idiom tests/hyperspace.test.ts uses to find a seed for a wanted
+ * survive/die outcome. Smallest seed whose FIRST draw dies (< the death
+ * chance): the fixtures below start every hyperspace jump with a fresh clone
+ * of state.rng, so the seed's first draw IS the roll that decides the jump. */
+const peekFloat = (seed: number): number => nextFloat({ seed })
+function findHyperspaceSeed(wantSurvive: boolean): number {
+  for (let s = 1; s < 1_000_000; s++) {
+    if (peekFloat(s) >= HYPERSPACE_DEATH_CHANCE === wantSurvive) return s
+  }
+  throw new Error('no seed found')
+}
+const HYPERSPACE_DIE_SEED = findHyperspaceSeed(false)
 
 function playing(seed: number, over: Partial<GameState> = {}): GameState {
   return { ...initialState(seed), mode: 'playing', lives: 3, ...over }
@@ -319,6 +336,145 @@ describe('saucer siren events', () => {
     const sc = out.saucer
     expect(sc).not.toBeNull()
     if (sc) expect(starts[0].size).toBe(sc.size)
+  })
+})
+
+// --- saucer siren on run end (A2-3) ---------------------------------------
+// Playtest bug: die on the last life while a saucer is on screen and the siren
+// keeps ringing over the game-over card (and on into attract). The run-end
+// frame flips mode to 'gameover' BEFORE the saucer subsystem runs, so the
+// saucer is never removed, withSirenEdge sees no edge, and no stop event ever
+// fires — while every later gameover/attract frame hard-resets `events: []`.
+// The contract pinned here is the EVENT, not the mechanism: the step that ends
+// the run with a live saucer must emit 'saucer-siren-stop' (the dispatch side
+// is already pinned — audio-dispatch.test.ts maps it to stopLoop). This is the
+// siren twin of the thrust H-1 regression block above.
+describe('saucer siren on run end (A2-3)', () => {
+  // A live saucer parked far from the CENTER death scene: zero velocity (never
+  // reaches the despawn edge), cold timers (never fires, never rerolls), and
+  // well clear of the rock so A-13's saucer↔rock collision can't remove it.
+  function idleSaucerAt(pos: Vec2, size: 'large' | 'small'): NonNullable<GameState['saucer']> {
+    return { pos: { ...pos }, velocity: { x: 0, y: 0 }, size, courseTimer: 999, fireTimer: 999 }
+  }
+  const SAUCER_POS: Vec2 = { x: 6000, y: 5000 }
+
+  // A last-life state one tick from death: ship rammed into a rock at CENTER,
+  // with the saucer alive elsewhere.
+  function lastLifeDeath(over: Partial<GameState> = {}): GameState {
+    return playing(4242, {
+      lives: 1,
+      ship: shipAt(CENTER),
+      rocks: [rockAt(CENTER, 'large')],
+      saucer: idleSaucerAt(SAUCER_POS, 'large'),
+      ...over,
+    })
+  }
+
+  it.each(['large', 'small'] as const)(
+    'emits saucer-siren-stop the frame the run ends with a live %s saucer',
+    (size) => {
+      const out = stepGame(lastLifeDeath({ saucer: idleSaucerAt(SAUCER_POS, size) }), NO_INPUT, DT)
+      expect(out.mode).toBe('gameover')
+      expect(eventsOfType(out, 'saucer-siren-stop')).toHaveLength(1)
+    },
+  )
+
+  // The headline: the siren must go silent EXACTLY once across the whole
+  // death → gameover card → attract arc — neither zero stops (today's bug:
+  // the loop rings forever) nor a stop spammed every gameover frame.
+  it('stops the siren exactly once through a fatal death into attract', () => {
+    let s = lastLifeDeath()
+    let stops = 0
+    for (let i = 0; i < 300; i++) {
+      s = stepGame(s, NO_INPUT, DT) // death frame, ~3 s gameover card, then attract
+      stops += eventsOfType(s, 'saucer-siren-stop').length
+    }
+    expect(s.mode).toBe('attract')
+    expect(stops).toBe(1)
+  })
+
+  // Story title says "siren AND any looping SFX": a pilot who dies holding
+  // thrust with a saucer on screen leaves BOTH loops running — the run-end
+  // frame must stop both. (thrust-stop alone is already pinned by H-1 above.)
+  it('stops both the siren and the thrust loop when the run ends with thrust held', () => {
+    const out = stepGame(lastLifeDeath({ thrustPrev: true }), THRUST, DT)
+    expect(out.mode).toBe('gameover')
+    expect(eventsOfType(out, 'thrust-stop')).toHaveLength(1)
+    expect(eventsOfType(out, 'saucer-siren-stop')).toHaveLength(1)
+  })
+
+  // Guard: no saucer on screen at run end ⇒ no stop event. The event's
+  // documented meaning is "the live saucer is gone" (core/events.ts); a
+  // blanket emit-on-every-gameover would break that contract.
+  it('emits no saucer-siren-stop when the run ends with no saucer live', () => {
+    const out = stepGame(lastLifeDeath({ saucer: null }), NO_INPUT, DT)
+    expect(out.mode).toBe('gameover')
+    expect(eventsOfType(out, 'saucer-siren-stop')).toHaveLength(0)
+  })
+
+  // Guard: a NON-final death keeps playing — the saucer is still alive and its
+  // siren must keep ringing while the pilot waits out the respawn. An
+  // over-eager stop-on-every-death fix would go silent here.
+  it('does not stop the siren on a death with ships still in reserve', () => {
+    const out = stepGame(lastLifeDeath({ lives: 3 }), NO_INPUT, DT)
+    expect(out.mode).toBe('playing')
+    expect(out.shipDestroyed).toBe(true)
+    expect(eventsOfType(out, 'saucer-siren-stop')).toHaveLength(0)
+  })
+
+  // Reviewer finding H-1 (rework round): a FAILED HYPERSPACE jump is the
+  // OTHER way a run can end, and it routes through the SAME handleShipDeath —
+  // but via a different door. triggerHyperspace calls handleShipDeath and
+  // REBINDS `state` BEFORE sim.ts's withSirenEdge ever reads `state.saucer` as
+  // its "incoming" side, so the comparison sees an already-nulled saucer on
+  // both sides of the edge (null -> null) and never fires the stop. The panic
+  // button players reach for on their last ship is exactly the death this
+  // fix's happy-path tests (above) never exercise — they all die by rock ram,
+  // which nulls the saucer AFTER withSirenEdge captures the pre-frame value.
+  it('emits saucer-siren-stop when a failed hyperspace jump ends the run (Reviewer H-1)', () => {
+    const s0 = playing(HYPERSPACE_DIE_SEED, {
+      lives: 1,
+      ship: shipAt(CENTER),
+      saucer: idleSaucerAt(SAUCER_POS, 'large'),
+    })
+    const out = stepGame(s0, HYPER, DT)
+    expect(out.mode).toBe('gameover') // sanity: the jump really did fail and end the run
+    expect(out.shipDestroyed).toBe(true)
+    expect(eventsOfType(out, 'saucer-siren-stop')).toHaveLength(1)
+  })
+
+  // Guard for the H-1 fix: a failed jump with ships STILL in reserve must not
+  // touch the siren — the saucer survives and keeps ringing while the pilot
+  // waits out the respawn, exactly like the rock-ram reserve-lives guard above.
+  it('does not stop the siren when a failed hyperspace jump leaves ships in reserve', () => {
+    const s0 = playing(HYPERSPACE_DIE_SEED, {
+      lives: 3,
+      ship: shipAt(CENTER),
+      saucer: idleSaucerAt(SAUCER_POS, 'large'),
+    })
+    const out = stepGame(s0, HYPER, DT)
+    expect(out.mode).toBe('playing')
+    expect(out.shipDestroyed).toBe(true)
+    expect(out.saucer).not.toBeNull()
+    expect(eventsOfType(out, 'saucer-siren-stop')).toHaveLength(0)
+  })
+
+  // Reviewer finding M-1 (rework round, regression pin): the run-ending death
+  // and the saucer's OWN removal can land in the SAME frame via a different
+  // mechanism — a mutual ship<->saucer ram (sim.ts's rammedSaucer branch nulls
+  // the saucer during the collision pass, BEFORE handleShipDeath's redundant
+  // null on the same object). Pins "exactly one", not zero or two, so a future
+  // refactor of the collision block or withSirenEdge can't silently regress it.
+  it('stops the siren exactly once when a mutual ship-saucer ram ends the run (Reviewer M-1)', () => {
+    const s0 = playing(4242, {
+      lives: 1,
+      ship: shipAt(CENTER),
+      saucer: idleSaucerAt(CENTER, 'large'), // parked ON the ship: a mutual ram, not a rock
+    })
+    const out = stepGame(s0, NO_INPUT, DT)
+    expect(out.mode).toBe('gameover')
+    expect(out.saucer).toBeNull() // mutual destruction (sim.ts rammedSaucer branch)
+    expect(eventsOfType(out, 'saucer-siren-stop')).toHaveLength(1)
   })
 })
 
