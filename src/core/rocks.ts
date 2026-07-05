@@ -46,12 +46,15 @@ export const ROCK_SPEED_MAX: Readonly<Record<RockSize, number>> = {
   small: 32,
 }
 
-/** A-7: angular spread (radians) applied to each child's inherited heading when
- * a rock splits. The split routine was the thinnest area in both fetches and the
- * exact spread formula was NOT found — but the original's two children visibly
- * diverge in direction on split, so a spread must exist. Feel-based provisional
- * (each child veers up to ±this off the parent heading). Verify vs quarry (A-17). */
-export const SPLIT_SPREAD_ANGLE = Math.PI / 6
+/** A2-6: per-axis random velocity kick (world-units/frame) added INDEPENDENTLY to
+ * each child's inherited velocity on split — the ROM's SetAstVel ($7203):
+ * `GetRandNum AND #$8F` ⇒ a signed kick of magnitude ≤16 lo-units per axis, added
+ * to the parent's AstXSpeed/AstYSpeed, then clamped (GetAstVelocity $7233). This
+ * Cartesian per-axis perturbation (NOT a polar heading rotation) is what makes the
+ * cabinet's two children fly apart, so momentum is not over-conserved. Port models
+ * it symmetric ±this; unit correspondence to ROM lo-units is provisional — verify
+ * vs quarry (A-17). */
+export const SPLIT_VELOCITY_KICK = 16
 
 /** A-7: per child-tier multiplier applied to the inherited parent speed before
  * re-clamping into the child tier's band (smaller children scale up slightly —
@@ -125,9 +128,10 @@ function clamp(x: number, lo: number, hi: number): number {
 /** A-7: split a destroyed rock into its children — large → 2 medium, medium →
  * 2 small, small → [] (gone). The GEOMETRIC half of destruction only: what
  * TRIGGERS a split is A-8 (collision), scoring is A-9. Each child spawns at the
- * parent's exact position (no offset) and inherits the parent's drift heading
- * with an INDEPENDENT random angular spread; its speed is the inherited speed
- * scaled by the child tier's factor and RE-CLAMPED into that tier's band (so a
+ * parent's exact position (no offset) and takes its DIRECTION from the parent's
+ * velocity plus an INDEPENDENT per-axis random kick (ROM SetAstVel $7203), so the
+ * two fly apart; its speed is the inherited speed scaled by the child tier's
+ * factor and RE-CLAMPED into that tier's band (the provisional speed model, so a
  * fast parent can't hand down an over-speed child, and a near-still parent still
  * yields drifting children); its shape variant is rerolled. Velocity stays in
  * the cabinet's per-60Hz-frame unit, so children drift consistently via updateRock.
@@ -139,11 +143,17 @@ export function splitRock(rock: Rock, rng: Rng): Rock[] {
   const childSize = SPLIT_CHILD[rock.size]
   if (childSize === null) return []
 
-  const parentAngle = Math.atan2(rock.velocity.y, rock.velocity.x)
   const parentSpeed = Math.hypot(rock.velocity.x, rock.velocity.y)
 
   const child = (): Rock => {
-    const angle = parentAngle + (nextFloat(rng) * 2 - 1) * SPLIT_SPREAD_ANGLE
+    // A2-6: ROM SetAstVel ($7203) — child velocity is the parent's plus an
+    // INDEPENDENT per-axis random kick (GetRandNum AND #$8F ⇒ ±SPLIT_VELOCITY_KICK).
+    // Take the DIRECTION from that Cartesian perturbation (this is what makes the
+    // pair fly apart) and keep the provisional per-tier speed magnitude (A-17 owns
+    // the speed model). Draw order per child: kick_x, kick_y, shapeVariant.
+    const vx = rock.velocity.x + (nextFloat(rng) * 2 - 1) * SPLIT_VELOCITY_KICK
+    const vy = rock.velocity.y + (nextFloat(rng) * 2 - 1) * SPLIT_VELOCITY_KICK
+    const angle = Math.atan2(vy, vx)
     const speed = clamp(
       parentSpeed * SPLIT_SPEED_SCALE[childSize],
       ROCK_SPEED_MIN[childSize],
