@@ -43,7 +43,7 @@ import {
   ROCK_HITBOX,
   ROCK_SPEED_MIN,
   ROCK_SPEED_MAX,
-  SPLIT_SPREAD_ANGLE,
+  SPLIT_VELOCITY_KICK,
   SPLIT_SPEED_SCALE,
 } from '../src/core/rocks'
 import { wrapPosition, type Bounds } from '../src/core/bounds'
@@ -443,17 +443,19 @@ describe('stepGame drifts rocks each tick in play (AC-6)', () => {
 // band is the per-frame ROCK_SPEED_MIN/MAX[childSize] — asserting the band pins
 // the per-frame unit inheritance the whole cabinet shares (session watch-item).
 //
-// Provisional constants (named + isolated so A-17 is a data-only swap; the ROM
-// split-velocity routine was the THINNEST area in both fetches, and the exact
-// spread formula was not found — so only RELATIONSHIPS are pinned here, never
-// magnitudes, mirroring A-6's "pin relationships, not literals" discipline):
-//   SPLIT_SPREAD_ANGLE  — feel-based; the original's children visibly diverge
-//     on split, so spread must exist. Only presence + a sane bound are pinned.
-//   SPLIT_SPEED_SCALE   — per child tier (~1.0-1.3, smaller scales up). Only
-//     positivity is pinned; magnitudes verify vs quarry (A-17).
+// Provisional constants (named + isolated so A-17 is a data-only swap). A2-6
+// RECOVERED the ROM split-velocity routine that the A-6/A-7 fetches missed:
+// SetAstVel ($7203) sets EACH child's velocity to the parent's plus an
+// INDEPENDENT per-axis random kick (GetRandNum AND #$8F ⇒ ±16 lo-units), then
+// GetAstVelocity ($7233) clamps it — a Cartesian per-axis perturbation, NOT the
+// polar heading-rotation the port shipped. That is the "momentum over-conserved"
+// bug: the polar model kept each child on ~the parent's heading so the two piled
+// up. The port now derives child DIRECTION from that kick (SPLIT_VELOCITY_KICK)
+// and keeps its provisional per-tier speed-magnitude band for child SPEED (A-17
+// owns the magnitudes; SPLIT_SPEED_SCALE stays as-is, only positivity pinned).
 //
-// RED until core/rocks.ts exports splitRock + SPLIT_SPREAD_ANGLE + SPLIT_SPEED_SCALE
-// (the failing named imports at the top of this file fail the whole suite until then).
+// RED until core/rocks.ts exports SPLIT_VELOCITY_KICK and splitRock derives child
+// headings from the per-axis kick (the divergence tests below fail on the cone).
 // ===========================================================================
 
 const TINY_BOUNDS: Bounds = { width: 100, height: 50 }
@@ -469,9 +471,14 @@ function angleDelta(a: number, b: number): number {
 }
 
 describe('split constants (provisional — verify vs ROM quarry in A-17)', () => {
-  it('has a positive, sane spread angle (spread is real; children do not reverse)', () => {
-    expect(SPLIT_SPREAD_ANGLE).toBeGreaterThan(0)
-    expect(SPLIT_SPREAD_ANGLE).toBeLessThanOrEqual(Math.PI)
+  it('exposes a positive ROM-derived per-axis velocity kick (SetAstVel $7203, AND #$8F ⇒ ±16) (A2-6)', () => {
+    // The recovered ROM routine perturbs each child's velocity per axis by an
+    // independent random kick (parent vel + kick), NOT a polar heading spread —
+    // this is what makes the cabinet's children fly apart. Magnitude bound is 16
+    // (the negative side of AND #$8F, sign-extended); the port models it as a
+    // symmetric ±16 in world-units/frame (unit correspondence provisional, A-17).
+    expect(SPLIT_VELOCITY_KICK).toBeGreaterThan(0)
+    expect(SPLIT_VELOCITY_KICK).toBe(16)
   })
 
   it('offers a positive speed scale for every child tier (medium, small)', () => {
@@ -531,16 +538,24 @@ describe('splitRock — velocity inheritance + angular spread (AC-5)', () => {
     expect(a.velocity).not.toEqual(b.velocity)
   })
 
-  it('keeps each child’s heading within SPLIT_SPREAD_ANGLE of the parent (inheritance + bounded spread)', () => {
+  it('does NOT confine children to a narrow cone around the parent — momentum is not over-conserved (A2-6)', () => {
+    // The old polar model bounded every child to ±π/6 of the parent heading, so
+    // both children kept ~the parent's direction and piled up ("overlap after
+    // break"). The ROM per-axis kick lets a child veer far past that cone. Prove
+    // the bound is broken: across seeds, some child deviates well beyond π/6.
     const parentVel = { x: 6, y: 3 }
     const parentHeading = heading(parentVel)
-    for (let seed = 1; seed <= 40; seed++) {
+    let maxDeviation = 0
+    for (let seed = 1; seed <= 80; seed++) {
       for (const kid of splitRock(rock({ size: 'large', velocity: parentVel }), createRng(seed))) {
-        expect(Math.abs(angleDelta(heading(kid.velocity), parentHeading))).toBeLessThanOrEqual(
-          SPLIT_SPREAD_ANGLE + 1e-9,
+        maxDeviation = Math.max(
+          maxDeviation,
+          Math.abs(angleDelta(heading(kid.velocity), parentHeading)),
         )
       }
     }
+    // Old ceiling was π/6 (0.524 rad); require > π/3 (1.047) — impossible under the cone.
+    expect(maxDeviation).toBeGreaterThan(Math.PI / 3)
   })
 
   it('gives children of a RESTING parent a real drift (never stationary — lower clamp at zero speed)', () => {
@@ -549,6 +564,54 @@ describe('splitRock — velocity inheritance + angular spread (AC-5)', () => {
         ROCK_SPEED_MIN.medium - 1e-9,
       )
     }
+  })
+})
+
+describe('splitRock — ROM per-axis velocity kick: children fly apart (A2-6)', () => {
+  // The recovered ROM routine (SetAstVel $7203 / GetAstVelocity $7233): each child
+  // gets the parent velocity plus an INDEPENDENT per-axis random kick (GetRandNum
+  // AND #$8F ⇒ ±16 lo-units), then a speed clamp. Direction is Cartesian-perturbed,
+  // not a polar rotation of the parent heading. The port keeps its provisional
+  // per-tier speed-magnitude band (A-17) and derives only child DIRECTION from the
+  // kick, so the observable fix is: children scatter widely instead of hugging the
+  // parent. These tests assert the scatter behaviorally — they do not prescribe the
+  // internal formula (parent+kick→direction, or parent+kick→rescale both work).
+
+  it('can kick a child sideways or backward — the kick overrides a slow parent’s momentum', () => {
+    // A per-axis kick larger than a parent velocity component flips that axis, so a
+    // child can point >90° off the parent. The old ±π/6 cone made this impossible.
+    const parentVel = { x: 6, y: 3 }
+    const parentHeading = heading(parentVel)
+    let sawWideVeer = false
+    for (let seed = 1; seed <= 80 && !sawWideVeer; seed++) {
+      for (const kid of splitRock(rock({ size: 'large', velocity: parentVel }), createRng(seed))) {
+        if (Math.abs(angleDelta(heading(kid.velocity), parentHeading)) > Math.PI / 2) {
+          sawWideVeer = true
+        }
+      }
+    }
+    expect(sawWideVeer).toBe(true)
+  })
+
+  it('sends the two children onto widely different headings (they separate, not pile up)', () => {
+    // Old model: each child was within ±π/6 of the parent, so the pair could never
+    // separate by more than π/3. The kick routinely drives them past a right angle.
+    const parentVel = { x: 6, y: 3 }
+    let sawWideSplit = false
+    for (let seed = 1; seed <= 80 && !sawWideSplit; seed++) {
+      const [a, b] = splitRock(rock({ size: 'large', velocity: parentVel }), createRng(seed))
+      if (Math.abs(angleDelta(heading(a.velocity), heading(b.velocity))) > Math.PI / 2) {
+        sawWideSplit = true
+      }
+    }
+    expect(sawWideSplit).toBe(true)
+  })
+
+  it('is deterministic per seed — same seed yields identical children (seeded, pure)', () => {
+    // The kick adds RNG draws; determinism must survive so A-8's cloned-rng split
+    // and every downstream wave spawn stay replayable.
+    const mk = () => splitRock(rock({ size: 'large', velocity: { x: 7, y: -4 } }), createRng(2026))
+    expect(mk()).toEqual(mk())
   })
 })
 
