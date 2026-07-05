@@ -322,6 +322,90 @@ describe('saucer siren events', () => {
   })
 })
 
+// --- saucer siren on run end (A2-3) ---------------------------------------
+// Playtest bug: die on the last life while a saucer is on screen and the siren
+// keeps ringing over the game-over card (and on into attract). The run-end
+// frame flips mode to 'gameover' BEFORE the saucer subsystem runs, so the
+// saucer is never removed, withSirenEdge sees no edge, and no stop event ever
+// fires — while every later gameover/attract frame hard-resets `events: []`.
+// The contract pinned here is the EVENT, not the mechanism: the step that ends
+// the run with a live saucer must emit 'saucer-siren-stop' (the dispatch side
+// is already pinned — audio-dispatch.test.ts maps it to stopLoop). This is the
+// siren twin of the thrust H-1 regression block above.
+describe('saucer siren on run end (A2-3)', () => {
+  // A live saucer parked far from the CENTER death scene: zero velocity (never
+  // reaches the despawn edge), cold timers (never fires, never rerolls), and
+  // well clear of the rock so A-13's saucer↔rock collision can't remove it.
+  function idleSaucerAt(pos: Vec2, size: 'large' | 'small'): NonNullable<GameState['saucer']> {
+    return { pos: { ...pos }, velocity: { x: 0, y: 0 }, size, courseTimer: 999, fireTimer: 999 }
+  }
+  const SAUCER_POS: Vec2 = { x: 6000, y: 5000 }
+
+  // A last-life state one tick from death: ship rammed into a rock at CENTER,
+  // with the saucer alive elsewhere.
+  function lastLifeDeath(over: Partial<GameState> = {}): GameState {
+    return playing(4242, {
+      lives: 1,
+      ship: shipAt(CENTER),
+      rocks: [rockAt(CENTER, 'large')],
+      saucer: idleSaucerAt(SAUCER_POS, 'large'),
+      ...over,
+    })
+  }
+
+  it.each(['large', 'small'] as const)(
+    'emits saucer-siren-stop the frame the run ends with a live %s saucer',
+    (size) => {
+      const out = stepGame(lastLifeDeath({ saucer: idleSaucerAt(SAUCER_POS, size) }), NO_INPUT, DT)
+      expect(out.mode).toBe('gameover')
+      expect(eventsOfType(out, 'saucer-siren-stop')).toHaveLength(1)
+    },
+  )
+
+  // The headline: the siren must go silent EXACTLY once across the whole
+  // death → gameover card → attract arc — neither zero stops (today's bug:
+  // the loop rings forever) nor a stop spammed every gameover frame.
+  it('stops the siren exactly once through a fatal death into attract', () => {
+    let s = lastLifeDeath()
+    let stops = 0
+    for (let i = 0; i < 300; i++) {
+      s = stepGame(s, NO_INPUT, DT) // death frame, ~3 s gameover card, then attract
+      stops += eventsOfType(s, 'saucer-siren-stop').length
+    }
+    expect(s.mode).toBe('attract')
+    expect(stops).toBe(1)
+  })
+
+  // Story title says "siren AND any looping SFX": a pilot who dies holding
+  // thrust with a saucer on screen leaves BOTH loops running — the run-end
+  // frame must stop both. (thrust-stop alone is already pinned by H-1 above.)
+  it('stops both the siren and the thrust loop when the run ends with thrust held', () => {
+    const out = stepGame(lastLifeDeath({ thrustPrev: true }), THRUST, DT)
+    expect(out.mode).toBe('gameover')
+    expect(eventsOfType(out, 'thrust-stop')).toHaveLength(1)
+    expect(eventsOfType(out, 'saucer-siren-stop')).toHaveLength(1)
+  })
+
+  // Guard: no saucer on screen at run end ⇒ no stop event. The event's
+  // documented meaning is "the live saucer is gone" (core/events.ts); a
+  // blanket emit-on-every-gameover would break that contract.
+  it('emits no saucer-siren-stop when the run ends with no saucer live', () => {
+    const out = stepGame(lastLifeDeath({ saucer: null }), NO_INPUT, DT)
+    expect(out.mode).toBe('gameover')
+    expect(eventsOfType(out, 'saucer-siren-stop')).toHaveLength(0)
+  })
+
+  // Guard: a NON-final death keeps playing — the saucer is still alive and its
+  // siren must keep ringing while the pilot waits out the respawn. An
+  // over-eager stop-on-every-death fix would go silent here.
+  it('does not stop the siren on a death with ships still in reserve', () => {
+    const out = stepGame(lastLifeDeath({ lives: 3 }), NO_INPUT, DT)
+    expect(out.mode).toBe('playing')
+    expect(out.shipDestroyed).toBe(true)
+    expect(eventsOfType(out, 'saucer-siren-stop')).toHaveLength(0)
+  })
+})
+
 // --- accelerating heartbeat (AC-6) ---------------------------------------
 // Pins the RELATIONSHIP (fewer live rocks ⇒ faster beat), not a ROM-exact
 // magnitude — the same "pin relationships, not magnitudes" convention as
