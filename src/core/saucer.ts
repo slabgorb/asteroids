@@ -27,10 +27,13 @@ import type { GameState, Saucer, Bullet, Vec2, SaucerSize } from './state'
 import { WORLD_W, WORLD_H } from './state'
 import { nextFloat, nextInt, type Rng } from './rng'
 
-/** Horizontal crossing speed, world lo-units per 60 Hz frame. Scaled from the
- * ROM's ±16-units/frame saucer drift (A-3's unscaled-lo-units convention).
- * verify vs quarry (A-17). */
-export const SAUCER_SPEED = 16
+/** Horizontal crossing speed, world lo-units per 60 Hz frame. The ROM applies its
+ * ±16-unit saucer drift INSIDE the every-4th-frame saucer-update gate (UpdateScr
+ * L6B93 `and #$03`), so the continuous-dt equivalent is that drift / 4 = 4 (A2-9:
+ * the port moved every frame → 4x too fast crossing + weave, "turns quickly").
+ * The base 16 drift is still provisional — verify vs quarry (A-17); the /4 gate is
+ * ROM-confirmed. */
+export const SAUCER_SPEED = 4
 
 /** Seconds until the FIRST saucer is eligible to spawn. The reload's starting
  * value was not found in either fetch — feel-based. verify vs quarry (A-17). */
@@ -50,9 +53,12 @@ export const SAUCER_COURSE_CHANGE_INTERVAL = 128 / 60
  * diagonal legs; exact values differ between sources. verify vs quarry (A-17). */
 export const SAUCER_VERTICAL_SPEEDS: readonly number[] = [-SAUCER_SPEED, 0, 0, SAUCER_SPEED]
 
-/** Seconds between shots (10 frames @60Hz — independently corroborated by both
- * fetched sources). */
-export const SAUCER_FIRE_INTERVAL = 10 / 60
+/** Seconds between shots. The ROM reloads ScrTimer to $0A = 10 (L6C54) but
+ * decrements it INSIDE the every-4th-frame saucer-update gate (UpdateScr L6B93),
+ * so a shot lands every 10 x 4 = 40 frames (A2-9: the port fired every 10 frames
+ * → bullet spam). The 10-tick reload is corroborated by both fetched sources; the
+ * x4 gate is ROM-confirmed. */
+export const SAUCER_FIRE_INTERVAL = 40 / 60
 
 /** Max simultaneous saucer shots. Sources disagree (2 vs 3). verify vs quarry (A-17). */
 export const SAUCER_MAX_BULLETS = 2

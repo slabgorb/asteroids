@@ -24,9 +24,18 @@ import { sinLookup } from './ship'
 export const MAX_PLAYER_SHOTS = 4
 
 /** Shot lifetime in 60 Hz frames — the per-shot countdown seeded on fire
- * (ShpShotTimer, $6d01 `lda #18`). A shot self-destructs after this many frames,
- * which is what bounds its range to a fraction of the playfield. */
+ * (ShpShotTimer, $6d01 `lda #18`, byte $12 = 18). Authentic seed; range is set
+ * by how OFTEN this counter ticks, not by inflating it. */
 export const BULLET_LIFETIME_FRAMES = 18
+
+/** How many 60 Hz frames pass between successive decrements of a shot's lifetime
+ * timer. The ROM integrates position every frame but only DECREMENTS the per-shot
+ * timer on every 4th frame (FrameTimerLo `and #$03`, L738F) — so a shot seeded to
+ * BULLET_LIFETIME_FRAMES actually flies BULLET_LIFETIME_FRAMES x 4 = 72 frames
+ * (~72 x 111 = 7992 lo-units, nearly the full 8192-wide screen). The port aged
+ * `life` every frame, dying at 18 frames (~a quarter screen): 4x too short (A2-9).
+ * Shared and owner-agnostic — player and saucer shots age on the same cadence. */
+export const SHOT_TIMER_PERIOD_FRAMES = 4
 
 /** Per-axis muzzle-speed clamp: the shot's heading velocity is capped at ±111
  * lo-units/frame (shot-velocity clamp near $6d1a/$6d22) BEFORE the ship's
@@ -54,14 +63,15 @@ function muzzleAxis(headingVal: number): number {
 }
 
 /** Advance every live bullet one step: integrate position by velocity with
- * toroidal wrap on both axes, decrement the lifetime counter, and drop shots
- * whose life has run out. Bullets fly straight — no thrust, no drag — so their
- * velocity is constant. Returns fresh bullet objects (no aliasing of the input).
- */
+ * toroidal wrap on both axes, decrement the lifetime counter once per
+ * SHOT_TIMER_PERIOD_FRAMES frames (the ROM's every-4th-frame timer DEC at L738F,
+ * while position integrates every frame), and drop shots whose life has run out.
+ * Bullets fly straight — no thrust, no drag — so their velocity is constant.
+ * Returns fresh bullet objects (no aliasing of the input). */
 function advance(bullets: readonly Bullet[], frames: number): Bullet[] {
   const out: Bullet[] = []
   for (const b of bullets) {
-    const life = b.life - frames
+    const life = b.life - frames / SHOT_TIMER_PERIOD_FRAMES
     if (life <= 0) continue
     out.push({
       pos: {

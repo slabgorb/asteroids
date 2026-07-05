@@ -55,14 +55,27 @@ import {
   WORLD_H,
   type GameState,
   type Ship,
+  type Bullet,
 } from '../src/core/state'
-import { MAX_PLAYER_SHOTS, BULLET_LIFETIME_FRAMES } from '../src/core/bullet'
+import {
+  MAX_PLAYER_SHOTS,
+  BULLET_LIFETIME_FRAMES,
+  SHOT_TIMER_PERIOD_FRAMES,
+  stepBullets,
+} from '../src/core/bullet'
 import { SHIP_MAX_SPEED } from '../src/core/ship'
 import { NO_INPUT, type Input } from '../src/core/input'
 
 const DT = 1 / 60
 
 const FIRE: Input = { ...NO_INPUT, fire: true }
+
+/** A shot's true on-screen lifetime in 60 Hz frames. The ROM seeds the per-shot
+ * timer to BULLET_LIFETIME_FRAMES ($12 = 18) but only decrements it every
+ * SHOT_TIMER_PERIOD_FRAMES-th frame (FrameTimerLo AND #$03, L738F) while
+ * positions integrate every frame — so a shot flies 18 x 4 = 72 frames. This is
+ * the number that governs range; the raw seed alone (18) is a 4x underestimate. */
+const EFFECTIVE_LIFETIME = BULLET_LIFETIME_FRAMES * SHOT_TIMER_PERIOD_FRAMES
 
 /** A playing-mode state with optional ship overrides (mirrors ship.test.ts). */
 function playing(seed = 1, ship: Partial<Ship> = {}): GameState {
@@ -201,14 +214,16 @@ describe('lifetime & movement (AC-4)', () => {
     expect(p1.y - p0.y).toBeCloseTo(v.y, 3)
   })
 
-  it('lives for its lifetime then is removed', () => {
-    // Present safely before expiry...
+  it('lives for its (effective) lifetime then is removed', () => {
+    // The shot's real lifetime is EFFECTIVE_LIFETIME frames (the raw timer seed
+    // decremented only every 4th frame — see the A2-9 block below), not the raw
+    // BULLET_LIFETIME_FRAMES counter. Present safely before expiry...
     const spawned = fireOnce(playing(1, { dir: 0 }))
     expect(spawned.bullets).toHaveLength(1)
-    const midlife = stepN(spawned, NO_INPUT, BULLET_LIFETIME_FRAMES - 2)
+    const midlife = stepN(spawned, NO_INPUT, EFFECTIVE_LIFETIME - 2)
     expect(midlife.bullets).toHaveLength(1)
     // ...and gone shortly after it.
-    const expired = stepN(spawned, NO_INPUT, BULLET_LIFETIME_FRAMES + 2)
+    const expired = stepN(spawned, NO_INPUT, EFFECTIVE_LIFETIME + 2)
     expect(expired.bullets).toHaveLength(0)
   })
 
@@ -279,7 +294,7 @@ describe('max-4-shots cap & edge-triggered fire (AC-5, AC-6)', () => {
   it('frees a slot when a bullet expires, allowing a new shot', () => {
     const spawned = stepGame(playing(1, { dir: 0 }), FIRE, DT)
     expect(spawned.bullets).toHaveLength(1)
-    const drained = stepN(spawned, NO_INPUT, BULLET_LIFETIME_FRAMES + 2)
+    const drained = stepN(spawned, NO_INPUT, EFFECTIVE_LIFETIME + 2)
     expect(drained.bullets).toHaveLength(0)
     const refired = stepGame(drained, FIRE, DT)
     expect(refired.bullets).toHaveLength(1)
@@ -320,5 +335,105 @@ describe('firing purity & determinism (AC-7)', () => {
   it('consumes no randomness: firing leaves the RNG seed untouched', () => {
     const s0 = playing(99, { dir: 0 })
     expect(fireRun(99, 90).rng.seed).toBe(s0.rng.seed)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// A2-9: shot RANGE — the ROM's every-4th-frame shot-timer cadence.
+//
+// Playtest bug: player shots die too early and can't reach distant targets.
+// Root cause, from the rev-4 disassembly (nmikstas/asteroids-disassembly): the
+// shot timer is SEEDED to $12 = 18 (L6CFF `lda #18`) — that byte is authentic —
+// but the ROM only decrements it on every 4th frame:
+//
+//     L738D: lda FrameTimerLo    ; Decrement shot timer every 4th frame.
+//     L738F: and #$03            ; Is it time to decrement the shot timer?
+//     L7391: bne DrawObjectDone  ; If not, branch.
+//     L7393: dec AstStatus,X     ; Decrement shot timer.
+//
+// Positions integrate EVERY frame (UpdateObjects, L6FD0 `adc AstXPosLo,X`), so a
+// shot actually flies 18 x 4 = 72 frames — ~72 x 111 = 7992 lo-units, nearly the
+// full 8192-wide screen. The port aged `life` once per frame, so shots died at
+// 18 frames (~1998 lo-units, a quarter screen): 4x too short.
+//
+// The fix must live in the SHARED, owner-agnostic aging path (advance() in
+// bullet.ts): the story AC requires "correct respective ranges" for BOTH player
+// and saucer shots, and the ROM's DEC is a generic per-object timer. Contract
+// for Dev: export SHOT_TIMER_PERIOD_FRAMES = 4 and age the shot timer once per
+// that many frames; keep BULLET_LIFETIME_FRAMES at the authentic 18.
+// ---------------------------------------------------------------------------
+describe('shot range: ROM timer cadence (A2-9)', () => {
+  it('pins the shot-timer decrement period to the ROM cadence of 4 frames (L738F `and #$03`)', () => {
+    expect(SHOT_TIMER_PERIOD_FRAMES).toBe(4)
+  })
+
+  it('leaves the raw timer seed at the authentic ROM byte $12 = 18 (L6CFF `lda #18`)', () => {
+    // Range is extended by the decrement CADENCE, never by inflating the seed —
+    // the seed byte is authentic and must not drift.
+    expect(BULLET_LIFETIME_FRAMES).toBe(18)
+  })
+
+  it('keeps a player shot airborne far past the old 18-frame death (the exact bug)', () => {
+    // Pre-fix, the shot was removed at 18 frames. It must now survive well beyond
+    // that — checked at 30 and 60 frames, both inside the true 72-frame life.
+    // This is the assertion that fails loudest against the shipped bug.
+    const spawned = fireOnce(playing(1, { dir: 0 }))
+    expect(spawned.bullets).toHaveLength(1)
+    expect(stepN(spawned, NO_INPUT, 30).bullets).toHaveLength(1)
+    expect(stepN(spawned, NO_INPUT, 60).bullets).toHaveLength(1)
+  })
+
+  it('travels nearly the full screen width at a cardinal heading (reaches distant targets)', () => {
+    // Fire +x from world centre, at rest, and track UNWRAPPED x-travel across
+    // most of the shot's life. Pre-fix travel was ~18 x 111 = 1998 lo-units
+    // (a quarter screen); the fix must carry it across most of the playfield.
+    const ship = { pos: { x: WORLD_W / 2, y: WORLD_H / 2 }, vel: { x: 0, y: 0 }, dir: 0 }
+    let s = fireOnce(playing(1, ship))
+    const v = s.bullets[0].vel.x
+    expect(v).toBeGreaterThan(0) // +x heading
+
+    const FRAMES = 64 // safely inside the 72-frame life
+    let prev = s.bullets[0].pos.x
+    let travel = 0
+    for (let i = 0; i < FRAMES; i++) {
+      s = stepGame(s, NO_INPUT, DT)
+      expect(s.bullets).toHaveLength(1) // alive the whole way
+      const x = s.bullets[0].pos.x
+      let dx = x - prev
+      if (dx < -WORLD_W / 2) dx += WORLD_W // unwrap a forward seam crossing
+      travel += dx
+      prev = x
+    }
+    // Constant-velocity flight for the full window (no drag on a shot)...
+    expect(travel).toBeGreaterThan((FRAMES - 1) * v)
+    expect(travel).toBeLessThan((FRAMES + 1) * v)
+    // ...covering most of the screen — not the pre-fix quarter.
+    expect(travel).toBeGreaterThan(0.8 * WORLD_W)
+  })
+
+  it('ages player and saucer shots alike — the cadence lives in the shared path', () => {
+    // The fix must be owner-agnostic (in advance()), not a player-only branch.
+    // Seed one player + one saucer shot with the same raw timer and step the
+    // shared stepBullets with no fire: both reach the extended life together.
+    // (The live saucer seed, SAUCER_BULLET_LIFETIME, is also 18, so real saucer
+    // shots gain the same authentic range — the AC's "respective ranges".)
+    const restShip: Ship = { pos: { x: 0, y: 0 }, vel: { x: 0, y: 0 }, dir: 0 }
+    const mk = (owner: 'player' | 'saucer'): Bullet => ({
+      pos: { x: 1000, y: 1000 },
+      vel: { x: 10, y: 0 },
+      life: BULLET_LIFETIME_FRAMES,
+      owner,
+    })
+    // firePrev=true + fire=false → the edge is never rising, so nothing spawns.
+    const step = (bs: readonly Bullet[]): Bullet[] =>
+      stepBullets(bs, restShip, true, NO_INPUT, DT).bullets
+
+    let bullets: Bullet[] = [mk('player'), mk('saucer')]
+    for (let i = 0; i < EFFECTIVE_LIFETIME - 4; i++) bullets = step(bullets)
+    expect(bullets.some((b) => b.owner === 'player')).toBe(true)
+    expect(bullets.some((b) => b.owner === 'saucer')).toBe(true)
+
+    for (let i = 0; i < 8; i++) bullets = step(bullets) // step past 72
+    expect(bullets).toHaveLength(0) // neither owner is special-cased
   })
 })
