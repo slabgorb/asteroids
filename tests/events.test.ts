@@ -32,6 +32,8 @@ import {
 } from '../src/core/state'
 import { NO_INPUT } from '../src/core/input'
 import type { GameEvent } from '../src/core/events'
+import { HYPERSPACE_DEATH_CHANCE } from '../src/core/hyperspace'
+import { nextFloat } from '../src/core/rng'
 
 const DT = 1 / 60
 
@@ -41,6 +43,21 @@ const CENTER: Vec2 = { x: 2000, y: 2000 }
 
 const FIRE = { ...NO_INPUT, fire: true }
 const THRUST = { ...NO_INPUT, thrust: true }
+const HYPER = { ...NO_INPUT, hyperspace: true }
+
+/** Peek what the first RNG draw for `seed` yields, without consuming it — the
+ * same idiom tests/hyperspace.test.ts uses to find a seed for a wanted
+ * survive/die outcome. Smallest seed whose FIRST draw dies (< the death
+ * chance): the fixtures below start every hyperspace jump with a fresh clone
+ * of state.rng, so the seed's first draw IS the roll that decides the jump. */
+const peekFloat = (seed: number): number => nextFloat({ seed })
+function findHyperspaceSeed(wantSurvive: boolean): number {
+  for (let s = 1; s < 1_000_000; s++) {
+    if (peekFloat(s) >= HYPERSPACE_DEATH_CHANCE === wantSurvive) return s
+  }
+  throw new Error('no seed found')
+}
+const HYPERSPACE_DIE_SEED = findHyperspaceSeed(false)
 
 function playing(seed: number, over: Partial<GameState> = {}): GameState {
   return { ...initialState(seed), mode: 'playing', lives: 3, ...over }
@@ -403,6 +420,61 @@ describe('saucer siren on run end (A2-3)', () => {
     expect(out.mode).toBe('playing')
     expect(out.shipDestroyed).toBe(true)
     expect(eventsOfType(out, 'saucer-siren-stop')).toHaveLength(0)
+  })
+
+  // Reviewer finding H-1 (rework round): a FAILED HYPERSPACE jump is the
+  // OTHER way a run can end, and it routes through the SAME handleShipDeath —
+  // but via a different door. triggerHyperspace calls handleShipDeath and
+  // REBINDS `state` BEFORE sim.ts's withSirenEdge ever reads `state.saucer` as
+  // its "incoming" side, so the comparison sees an already-nulled saucer on
+  // both sides of the edge (null -> null) and never fires the stop. The panic
+  // button players reach for on their last ship is exactly the death this
+  // fix's happy-path tests (above) never exercise — they all die by rock ram,
+  // which nulls the saucer AFTER withSirenEdge captures the pre-frame value.
+  it('emits saucer-siren-stop when a failed hyperspace jump ends the run (Reviewer H-1)', () => {
+    const s0 = playing(HYPERSPACE_DIE_SEED, {
+      lives: 1,
+      ship: shipAt(CENTER),
+      saucer: idleSaucerAt(SAUCER_POS, 'large'),
+    })
+    const out = stepGame(s0, HYPER, DT)
+    expect(out.mode).toBe('gameover') // sanity: the jump really did fail and end the run
+    expect(out.shipDestroyed).toBe(true)
+    expect(eventsOfType(out, 'saucer-siren-stop')).toHaveLength(1)
+  })
+
+  // Guard for the H-1 fix: a failed jump with ships STILL in reserve must not
+  // touch the siren — the saucer survives and keeps ringing while the pilot
+  // waits out the respawn, exactly like the rock-ram reserve-lives guard above.
+  it('does not stop the siren when a failed hyperspace jump leaves ships in reserve', () => {
+    const s0 = playing(HYPERSPACE_DIE_SEED, {
+      lives: 3,
+      ship: shipAt(CENTER),
+      saucer: idleSaucerAt(SAUCER_POS, 'large'),
+    })
+    const out = stepGame(s0, HYPER, DT)
+    expect(out.mode).toBe('playing')
+    expect(out.shipDestroyed).toBe(true)
+    expect(out.saucer).not.toBeNull()
+    expect(eventsOfType(out, 'saucer-siren-stop')).toHaveLength(0)
+  })
+
+  // Reviewer finding M-1 (rework round, regression pin): the run-ending death
+  // and the saucer's OWN removal can land in the SAME frame via a different
+  // mechanism — a mutual ship<->saucer ram (sim.ts's rammedSaucer branch nulls
+  // the saucer during the collision pass, BEFORE handleShipDeath's redundant
+  // null on the same object). Pins "exactly one", not zero or two, so a future
+  // refactor of the collision block or withSirenEdge can't silently regress it.
+  it('stops the siren exactly once when a mutual ship-saucer ram ends the run (Reviewer M-1)', () => {
+    const s0 = playing(4242, {
+      lives: 1,
+      ship: shipAt(CENTER),
+      saucer: idleSaucerAt(CENTER, 'large'), // parked ON the ship: a mutual ram, not a rock
+    })
+    const out = stepGame(s0, NO_INPUT, DT)
+    expect(out.mode).toBe('gameover')
+    expect(out.saucer).toBeNull() // mutual destruction (sim.ts rammedSaucer branch)
+    expect(eventsOfType(out, 'saucer-siren-stop')).toHaveLength(1)
   })
 })
 
