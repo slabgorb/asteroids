@@ -68,6 +68,18 @@ describe('render.ts — draws every live entity class, not just the ship (playfi
       'render.ts must gate the ship on state.shipDestroyed',
     ).toBe(true)
   })
+
+  // A2-5 (Reviewer finding, rework): the renderer grew a new entity class
+  // (shipDebris) with no wiring check extending this describe block's pattern
+  // to it — a mutant deleting the drawShipDebris call would have passed every
+  // existing test here.
+  it('reads state.shipDebris — the ship breakup debris must be drawn', () => {
+    expect(existsSync(RENDER)).toBe(true)
+    expect(
+      /\bstate\.shipDebris\b/.test(read(RENDER)),
+      'render.ts must draw state.shipDebris',
+    ).toBe(true)
+  })
 })
 
 describe('main.ts — wires the renderer and real input (AC-1, AC-5)', () => {

@@ -17,6 +17,7 @@ import type { Rng } from './rng'
 import { stepShip, SHIP_HITBOX } from './ship'
 import { stepBullets } from './bullet'
 import { updateRocks, splitRock, ROCK_HITBOX } from './rocks'
+import { breakShip, updateShipDebris } from './shipDebris'
 import { updateWaveDirector } from './waves'
 import { updateSpawnDirector, stepSaucer, SAUCER_HITBOX, SAUCER_ROCK_COLLISION_ENABLED } from './saucer'
 import { applyScore, addScore, SAUCER_SCORE } from './score'
@@ -154,6 +155,11 @@ function stepAttract(state: GameState, input: Input, dt: number, startPressed: b
     rng,
     tick: state.tick + 1,
     rocks: updateRocks(state.rocks, dt, WORLD_BOUNDS),
+    // A2-5: keep ship-death debris drifting/fading even in attract — a run-
+    // ending death's wreckage can outlive the game-over card and carry into
+    // the following attract loop, and must not freeze there (a fresh cabinet's
+    // debris is [], so this is a no-op unless a prior run left live segments).
+    shipDebris: updateShipDebris(state.shipDebris, dt),
     startPrev: input.start,
     events: [], // A-18: no gameplay-audio events in attract; never carry a stale frame's forward
   }
@@ -173,7 +179,18 @@ function stepGameOver(
   // A-18: no gameplay-audio events during gameover; `events: []` here (rather
   // than at each return below) guarantees every branch of this function gets
   // a fresh frame, never a carried-forward stale one.
-  const base: GameState = { ...state, rng, tick: state.tick + 1, startPrev: input.start, events: [] }
+  // A2-5: age ship-death debris here too — a final death flips straight to
+  // 'gameover', so this branch (not the 'playing' pipeline) is what must keep
+  // the wreckage drifting/fading through the entire GAME OVER card. Every
+  // return below derives from `base`, so aging once here covers them all.
+  const base: GameState = {
+    ...state,
+    rng,
+    tick: state.tick + 1,
+    shipDebris: updateShipDebris(state.shipDebris, dt),
+    startPrev: input.start,
+    events: [],
+  }
   const over = state.gameOver
   // Defensive: a gameover state with no phase (pre-A-16 fixtures) just idles.
   if (over === null) return base
@@ -278,6 +295,7 @@ export function stepGame(inState: GameState, input: Input, dt: number): GameStat
   if (thrustFallingEdge) events.push({ type: 'thrust-stop' })
 
   let rocks = updateRocks(state.rocks, dt, WORLD_BOUNDS)
+  let shipDebris = updateShipDebris(state.shipDebris, dt)
   let liveBullets: Bullet[] = bullets
   let score = state.score
   let lives = state.lives
@@ -388,6 +406,10 @@ export function stepGame(inState: GameState, input: Input, dt: number): GameStat
   // instead of dying silently.
   if (!wasDeadBefore && shipDestroyed) {
     events.push({ type: 'explosion', source: 'ship' })
+    // A2-5: the ship's rendered silhouette fractures into its 4 polygon edges
+    // as independent debris — the visual twin of the explosion event above,
+    // gated on the same edge (fires even on the last life, like the event).
+    shipDebris = [...shipDebris, ...breakShip(ship, rng)]
     // A dead ship's engine goes silent (the intent behind the alive-gated thrust
     // events above). But the thrust-stop falling edge can never fire once dead,
     // so a ship that dies with thrust ENGAGED would leave its loop humming
@@ -411,6 +433,7 @@ export function stepGame(inState: GameState, input: Input, dt: number): GameStat
     ship: revealedShip,
     rocks,
     bullets: liveBullets,
+    shipDebris,
     saucer,
     score,
     lives,

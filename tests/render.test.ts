@@ -21,7 +21,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { render } from '../src/shell/render'
-import { initialState, type GameState, type Ship, type Mode } from '../src/core/state'
+import { initialState, type GameState, type Ship, type Mode, type ShipDebrisSegment } from '../src/core/state'
 import { NO_INPUT, type Input } from '../src/core/input'
 
 const W = 800
@@ -35,6 +35,11 @@ function makeCtx() {
   const segments: number[][] = []
   const fills: { x: number; y: number; w: number; h: number; style: string }[] = []
   const clears: { x: number; y: number; w: number; h: number }[] = []
+  // A2-5: the alpha in effect at the moment each shape COMMITS (stroke()) — the
+  // real canvas rasterizes with globalAlpha as of that call, so this is the
+  // faithful place to capture it (not e.g. reading rec.globalAlpha after the
+  // fact, which could observe a later shape's value).
+  const strokeAlphas: number[] = []
   let pen: [number, number] = [0, 0]
   const rec = {
     fillStyle: '' as string,
@@ -53,7 +58,9 @@ function makeCtx() {
     rotate() {},
     beginPath() {},
     closePath() {},
-    stroke() {},
+    stroke() {
+      strokeAlphas.push(rec.globalAlpha)
+    },
     fill() {},
     moveTo(x: number, y: number) {
       pen = [x, y]
@@ -73,7 +80,7 @@ function makeCtx() {
     // text call is a recorded-nowhere no-op (tests/render-hud.test.ts owns text).
     fillText() {},
   }
-  return { ctx: rec as unknown as CanvasRenderingContext2D, segments, fills, clears }
+  return { ctx: rec as unknown as CanvasRenderingContext2D, segments, fills, clears, strokeAlphas }
 }
 
 /** A live run with the ship overridden — mode defaults to 'playing' so the ship
@@ -206,5 +213,47 @@ describe('render — core purity (AC-4)', () => {
     render(makeCtx().ctx, state, W, H, thrusting)
     // The renderer READS the core state and draws it; it must not write back.
     expect(state).toEqual(before)
+  })
+})
+
+// A2-5 (Reviewer finding, rework): drawShipDebris and its wiring had zero test
+// coverage — a mutant deleting the call, or the alpha-fade math, would have
+// passed every pre-existing test in this file. `shipDestroyed: true` (and the
+// default `lives: 0`/empty rocks/bullets/saucer from initialState) suppress
+// every OTHER stroked entity, so `segments`/`strokeAlphas` isolate debris only.
+describe('render — ship breakup debris (A2-5)', () => {
+  function debrisState(segments: ShipDebrisSegment[]): GameState {
+    const s = initialState(1979)
+    return { ...s, mode: 'playing', shipDestroyed: true, shipDebris: segments }
+  }
+
+  const segAt = (life: number): ShipDebrisSegment => ({
+    p1: { x: 4000, y: 3000 },
+    p2: { x: 4100, y: 3000 },
+    vel: { x: 0, y: 0 },
+    life,
+  })
+
+  it('draws each debris segment as a stroked line', () => {
+    const { ctx, segments } = makeCtx()
+    render(ctx, debrisState([segAt(1), segAt(1)]), W, H, NO_INPUT)
+    expect(segments.length).toBe(2) // one moveTo->lineTo per segment
+  })
+
+  it('draws nothing when there is no debris', () => {
+    const { ctx, segments } = makeCtx()
+    render(ctx, debrisState([]), W, H, NO_INPUT)
+    expect(segments.length).toBe(0)
+  })
+
+  it('fades a segment out — less remaining life strokes at lower alpha', () => {
+    const bright = makeCtx()
+    render(bright.ctx, debrisState([segAt(1.5)]), W, H, NO_INPUT) // full life
+    const dim = makeCtx()
+    render(dim.ctx, debrisState([segAt(0.1)]), W, H, NO_INPUT) // nearly expired
+
+    expect(bright.strokeAlphas).toHaveLength(1)
+    expect(dim.strokeAlphas).toHaveLength(1)
+    expect(dim.strokeAlphas[0]).toBeLessThan(bright.strokeAlphas[0])
   })
 })
