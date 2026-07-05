@@ -37,7 +37,7 @@
 // sim.ts spawns/advances it on the death edge.
 
 import { describe, it, expect } from 'vitest'
-import { breakShip, updateShipDebris } from '../src/core/shipDebris'
+import { breakShip, updateShipDebris, DEBRIS_LIFETIME_S } from '../src/core/shipDebris'
 import {
   initialState,
   WORLD_W,
@@ -176,6 +176,38 @@ describe('breakShip — each piece drifts independently (fracture, not rigid tra
       expect(seg.life).toBeGreaterThan(0)
     }
   })
+
+  // Reviewer finding (rework): only `> 0` was pinned, not the exact constant —
+  // a mutant changing DEBRIS_LIFETIME_S's value would have passed every test.
+  it('every segment starts with exactly DEBRIS_LIFETIME_S of life', () => {
+    const ship = shipAt({ x: 1000, y: 1000 })
+    for (const seg of breakShip(ship, createRng(3))) {
+      expect(seg.life).toBe(DEBRIS_LIFETIME_S)
+    }
+  })
+
+  // Reviewer finding (rework, high confidence): every fixture elsewhere in this
+  // file uses a stationary ship (vel {0,0}), so `ship.vel.x +`/`ship.vel.y +`
+  // in breakShip was completely unverified — deleting those terms would have
+  // passed every other test. Same rng seed for both ships isolates the DELTA
+  // between them to exactly the ship's own velocity (the outward-spread angle
+  // per edge is identical either way, since it's drawn from the same rng
+  // sequence and doesn't depend on ship.vel).
+  it("inherits the ship's own velocity as a base drift component (splitRock's precedent: children inherit the parent's motion)", () => {
+    const stationary = shipAt({ x: 1000, y: 1000 })
+    const moving = shipAt({ x: 1000, y: 1000 }, { vel: { x: 20, y: -10 } })
+    const segsStationary = breakShip(stationary, createRng(3))
+    const segsMoving = breakShip(moving, createRng(3))
+    for (let i = 0; i < 4; i++) {
+      expectVec(
+        {
+          x: segsMoving[i].vel.x - segsStationary[i].vel.x,
+          y: segsMoving[i].vel.y - segsStationary[i].vel.y,
+        },
+        moving.vel,
+      )
+    }
+  })
 })
 
 // --- breakShip: rng discipline (mirrors splitRock's contract exactly) ----
@@ -252,6 +284,23 @@ describe('updateShipDebris — rigid translation (the piece drifts, it does not 
     const seg = segment({ vel: { x: 6, y: -3 } })
     const [out] = updateShipDebris([seg], DT)
     expectVec(out.vel, { x: 6, y: -3 })
+  })
+
+  // Reviewer finding (rework, low): never exercised with no segments at all.
+  it('returns an empty array when given no segments', () => {
+    expect(updateShipDebris([], DT)).toEqual([])
+  })
+
+  // Reviewer finding (rework, low): the TEA-logged "no toroidal wrap" design
+  // choice (Design Deviations) was never pinned by a test — bullet.ts's own
+  // analogous choice has both a doc comment AND a regression test
+  // (tests/bullet.test.ts: "does NOT wrap"). A piece drifting past WORLD_W
+  // must NOT fold back toward 0 the way a rock would (rocks.ts's updateRock).
+  it('does not wrap at the world boundary (unlike rocks) — a piece drifting past the edge just keeps going', () => {
+    const seg = segment({ p1: { x: WORLD_W - 2, y: 100 }, p2: { x: WORLD_W + 8, y: 100 }, vel: { x: 5, y: 0 } })
+    const [out] = updateShipDebris([seg], DT)
+    // raw x = (WORLD_W - 2) + 5*1 = WORLD_W + 3 — past the edge, not folded to ~3.
+    expect(out.p1.x).toBeGreaterThan(WORLD_W)
   })
 })
 
@@ -378,6 +427,75 @@ describe('stepGame — spawns ship debris on the destruction edge', () => {
     const out = stepGame(s0, NO_INPUT, DT)
     expect(out.shipDestroyed).toBe(true) // still dead — respawn was blocked
     expect(out.shipDebris).toHaveLength(1) // the one pre-existing piece, not +4 more
+  })
+
+  // Reviewer finding (rework, medium): only same-tick and stays-dead scenarios
+  // were covered — never a SECOND, independent death while debris from an
+  // earlier one is still animating. Constructed directly (a respawn already
+  // landed: shipDestroyed false, one aged leftover segment) rather than
+  // simulating the full multi-hundred-tick respawn sequence, to isolate
+  // exactly the array-append behavior at the death edge (sim.ts).
+  it('appends a fresh batch to any still-animating debris from an earlier death (does not replace it)', () => {
+    const priorDebris: ShipDebrisSegment[] = [
+      segment({ p1: { x: 500, y: 500 }, p2: { x: 510, y: 500 }, vel: { x: 1, y: 0 }, life: 1 }),
+    ]
+    const s0 = playing(4242, {
+      shipDestroyed: false, // a respawn already happened; the ship is alive again
+      shipDebris: priorDebris,
+      ship: shipAt(CENTER),
+      rocks: [rockAt(CENTER)], // a second, independent ram
+    })
+    const out = stepGame(s0, NO_INPUT, DT)
+    expect(out.shipDestroyed).toBe(true)
+    expect(out.shipDebris).toHaveLength(5) // the 1 pre-existing (aged) + 4 fresh
+  })
+})
+
+// Reviewer finding (HIGH, rework headline): stepGame's 'attract'/'gameover'
+// early returns (sim.ts ~228-229) never reach updateShipDebris (sim.ts ~282),
+// so debris spawned by a run-ending death FREEZES — stops fading AND stops
+// drifting — for the entire GAME OVER card and into the following attract
+// loop, directly contradicting the story's own "fading line segments" title.
+// Reproduces on every terminal death, not an edge case. RED until sim.ts ages
+// shipDebris regardless of mode (or explicitly clears it on the terminal
+// transition).
+describe('stepGame — ship debris keeps fading through game over (Reviewer finding, HIGH)', () => {
+  it('fades the debris to nothing within DEBRIS_LIFETIME_S even after the run ends', () => {
+    let s = playing(4242, { lives: 1, ship: shipAt(CENTER), rocks: [rockAt(CENTER)] })
+    s = stepGame(s, NO_INPUT, DT) // the death tick — mode flips to 'gameover', 4 segments spawn
+    expect(s.mode).toBe('gameover')
+    expect(s.shipDebris).toHaveLength(4)
+
+    // Step well past DEBRIS_LIFETIME_S (1.5s) while the game-over card is up —
+    // GAME_OVER_DISPLAY_S is 3s, so this window stays inside the card either
+    // way (qualifying or not) and isolates the fade question from the
+    // attract-mode transition.
+    const ticksToOutlastLifetime = Math.ceil(DEBRIS_LIFETIME_S / DT) + 10
+    for (let i = 0; i < ticksToOutlastLifetime; i++) {
+      s = stepGame(s, NO_INPUT, DT)
+    }
+    expect(s.mode).toBe('gameover') // sanity: still in the window this test means to cover
+    expect(s.shipDebris).toHaveLength(0) // fully faded — must keep aging through gameover
+  })
+
+  it('keeps fading into attract mode too, if the card ends before the debris does', () => {
+    // A non-qualifying run: the gameover card lasts exactly GAME_OVER_DISPLAY_S
+    // (3s) — longer than DEBRIS_LIFETIME_S (1.5s) — so by the time the cabinet
+    // returns to attract, the debris must already be gone, not carried over
+    // frozen into the attract-mode demo loop. score: 0 (playing()'s default)
+    // guarantees the non-qualifying path — qualifiesForHighScore rejects any
+    // non-positive score outright (highscore.ts), regardless of the board.
+    let s = playing(4242, { lives: 1, ship: shipAt(CENTER), rocks: [rockAt(CENTER)] })
+    s = stepGame(s, NO_INPUT, DT)
+    expect(s.mode).toBe('gameover')
+    expect(s.gameOver?.qualifies).toBe(false) // sanity: takes the timed, non-qualifying path
+
+    const ticksToReachAttract = Math.ceil((3 + 0.5) / DT) // past GAME_OVER_DISPLAY_S with margin
+    for (let i = 0; i < ticksToReachAttract; i++) {
+      s = stepGame(s, NO_INPUT, DT)
+    }
+    expect(s.mode).toBe('attract') // sanity: the card really did end
+    expect(s.shipDebris).toHaveLength(0) // no frozen wreckage carried into attract
   })
 })
 
