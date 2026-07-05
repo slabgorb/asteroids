@@ -83,9 +83,13 @@ describe('reference/velocities — saucer (A-17)', () => {
     expect(Array.from(SAUCER_Y_SPEEDS)).toEqual([-16, 0, 0, 16])
   })
 
-  it('is the single source of truth for core SAUCER_VERTICAL_SPEEDS', async () => {
+  it('is the single source of truth for core SAUCER_VERTICAL_SPEEDS (÷4 for the every-4th-frame gate, A2-9)', async () => {
+    // A2-9: the ROM applies this drift INSIDE the every-4th-frame saucer-update
+    // gate (UpdateScr L6B93 `and #$03`), but core integrates continuously every
+    // frame — so the raw ROM magnitude divides by 4 (16 → 4) to land on the same
+    // real-world crossing speed. The raw table itself is untouched ROM data.
     const { SAUCER_Y_SPEEDS } = await loadVel()
-    expect(Array.from(SAUCER_VERTICAL_SPEEDS)).toEqual(Array.from(SAUCER_Y_SPEEDS))
+    expect(Array.from(SAUCER_VERTICAL_SPEEDS)).toEqual(Array.from(SAUCER_Y_SPEEDS).map((v) => v / 4))
   })
 
   it('pins the saucer bullet speed to 111 ($6F) and wires core', async () => {
@@ -94,10 +98,14 @@ describe('reference/velocities — saucer (A-17)', () => {
     expect(CORE_SAUCER_BULLET_SPEED).toBe(SAUCER_BULLET_SPEED)
   })
 
-  it('pins the saucer fire interval to 10 frames ($0A) — core carries it in seconds', async () => {
+  it('pins the saucer fire interval to 10 frames ($0A) — core carries it in seconds, ×4 for the gate (A2-9)', async () => {
+    // A2-9: ScrTimer reloads to $0A = 10 (L6C54) but decrements INSIDE the same
+    // every-4th-frame gate (UpdateScr L6B93), so a shot lands every 10 x 4 = 40
+    // real frames. The raw 10-tick reload is untouched ROM data; core's seconds
+    // value must reflect the gated cadence, not a naive 1:1 frame conversion.
     const { SAUCER_FIRE_INTERVAL_FRAMES } = await loadVel()
     expect(SAUCER_FIRE_INTERVAL_FRAMES).toBe(10)
-    expect(SAUCER_FIRE_INTERVAL).toBeCloseTo(SAUCER_FIRE_INTERVAL_FRAMES / 60, 10)
+    expect(SAUCER_FIRE_INTERVAL).toBeCloseTo((SAUCER_FIRE_INTERVAL_FRAMES * 4) / 60, 10)
   })
 })
 
