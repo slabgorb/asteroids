@@ -25,7 +25,13 @@ tmux.conf
 # Reference disassembly — the commented reverse-engineered source of Atari's
 # Asteroids (1979). A derivative of copyrighted code, kept purely as a local
 # learning/reference quarry. NEVER committed or pushed.
-reference/
+#
+# A-17: the *ported* ROM data tables (reference/*.ts) ARE committed — they are
+# derived numeric tables, not the copyrighted source. Only the raw disassembly
+# quarry (subdirs, listings) stays ignored, so ignore the contents of reference/
+# but re-include the ported .ts tables.
+reference/*
+!reference/*.ts
 
 # Audio assets — baked/served separately (e.g. Cloudflare R2), not committed
 sfx/

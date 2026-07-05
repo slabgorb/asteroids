@@ -109,7 +109,7 @@ describe('reference/shapes — asteroid outlines (A-17, ROM $5000-$57FF)', () =>
 
   it('gives the four outlines the ROM move counts 11 / 13 / 12 / 13', async () => {
     const { ROCK_SHAPES } = await loadShapes()
-    expect(ROCK_SHAPES.map((s: { moves: Move[] }) => s.moves.length)).toEqual([11, 13, 12, 13])
+    expect(ROCK_SHAPES.map((s) => s.moves.length)).toEqual([11, 13, 12, 13])
   })
 
   it('carries no rotation/angle field (rocks never spin in the ROM)', async () => {
@@ -166,7 +166,7 @@ describe('reference/shapes — schema invariants (A-17)', () => {
     expect(all.length).toBe(6)
     for (const shape of all) {
       expect(shape.moves.length).toBeGreaterThan(0)
-      for (const m of shape.moves as Move[]) {
+      for (const m of shape.moves) {
         expect(['SVEC', 'VEC']).toContain(m.op)
         expect(Number.isInteger(m.scale)).toBe(true)
         expect(Number.isInteger(m.x)).toBe(true)
