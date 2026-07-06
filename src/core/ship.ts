@@ -81,16 +81,22 @@ const WORLD_BOUNDS: Bounds = { width: WORLD_W, height: WORLD_H }
 
 /** Advance the ship one step. `dt` is seconds; rates are ROM-per-frame, so
  * they scale by dt*60 (the fixed-timestep loop feeds exactly 1/60). */
-export function stepShip(ship: Ship, input: Input, dt: number): Ship {
+export function stepShip(
+  ship: Ship,
+  input: Input,
+  dt: number,
+  rotationRate: number = SHIP_ROTATION_RATE,
+): Ship {
   const frames = dt * 60
 
   // Rotation first, thrust reads the updated direction — ROM order
   // (ChkPlyrInput updates ShipDir at $7097 before ChkThrust runs). Left
   // wins over right: the ROM checks left first and skips the right check
-  // entirely (branch at $7089).
+  // entirely (branch at $7089). rotationRate defaults to SHIP_ROTATION_RATE
+  // (the ROM +3); the dev tuning panel (A-20) can inject a different rate.
   let dir = ship.dir
-  if (input.left) dir += SHIP_ROTATION_RATE * frames
-  else if (input.right) dir -= SHIP_ROTATION_RATE * frames
+  if (input.left) dir += rotationRate * frames
+  else if (input.right) dir -= rotationRate * frames
   // Fold onto the 256-unit circle (a heading, not a position — the shared
   // wrapPosition handles the playfield; this stays a plain mod).
   dir = ((dir % 256) + 256) % 256
