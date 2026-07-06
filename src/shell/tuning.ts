@@ -21,7 +21,10 @@ export interface RotationTuning {
 
 export const DEFAULT_TUNING: Readonly<RotationTuning> = {
   turnRate: SHIP_ROTATION_RATE,
-  tapHoldDelayFrames: 12,
+  // Playtested default (A-20): 3 frames ≈ 50 ms — a quick tap still lands a
+  // single ROM nudge, while a held key settles into continuous spin almost
+  // immediately. Live-adjustable via the ?tune panel.
+  tapHoldDelayFrames: 3,
 }
 
 export function createTuning(overrides?: Partial<RotationTuning>): RotationTuning {
