@@ -221,3 +221,58 @@ describe('shouldEmitRotate — tap vs hold decision (A-20)', () => {
     expect(shouldEmitRotate(DELAY + 50, DELAY)).toBe(true)
   })
 })
+
+describe('createInputController — rotate tap-to-nudge (A-20)', () => {
+  const DELAY = 12
+  function buildTuned() {
+    return createInputController(target as unknown as HTMLElement, {
+      turnRate: 3,
+      tapHoldDelayFrames: DELAY,
+    })
+  }
+
+  it('a tap (press, one sample, release) yields exactly one frame of rotation', () => {
+    const ctrl = buildTuned()
+    windowBus.emit('keydown', { code: 'ArrowLeft' })
+    expect(ctrl.sample().left, 'press frame nudges').toBe(true)
+    windowBus.emit('keyup', { code: 'ArrowLeft' })
+    expect(ctrl.sample().left, 'released → rest').toBe(false)
+  })
+
+  it('a held key nudges once, dwells through the delay, then spins continuously', () => {
+    const ctrl = buildTuned()
+    windowBus.emit('keydown', { code: 'ArrowLeft' })
+    expect(ctrl.sample().left, 'frame 1 nudge').toBe(true)
+    for (let f = 2; f <= DELAY; f++) {
+      expect(ctrl.sample().left, `frame ${f} dwell`).toBe(false)
+    }
+    expect(ctrl.sample().left, 'past delay → continuous').toBe(true)
+    expect(ctrl.sample().left, 'still continuous').toBe(true)
+  })
+
+  it('registers one nudge for a sub-frame tap (press AND release between samples)', () => {
+    const ctrl = buildTuned()
+    windowBus.emit('keydown', { code: 'ArrowLeft' })
+    windowBus.emit('keyup', { code: 'ArrowLeft' }) // released before any sample()
+    expect(ctrl.sample().left, 'edge latch → one nudge').toBe(true)
+    expect(ctrl.sample().left, 'then rest').toBe(false)
+  })
+
+  it('each fresh tap after a release nudges again', () => {
+    const ctrl = buildTuned()
+    windowBus.emit('keydown', { code: 'ArrowLeft' })
+    expect(ctrl.sample().left).toBe(true)
+    windowBus.emit('keyup', { code: 'ArrowLeft' })
+    expect(ctrl.sample().left).toBe(false)
+    windowBus.emit('keydown', { code: 'ArrowLeft' })
+    expect(ctrl.sample().left, 'second tap nudges').toBe(true)
+  })
+
+  it('left and right track independently', () => {
+    const ctrl = buildTuned()
+    windowBus.emit('keydown', { code: 'ArrowRight' })
+    const s = ctrl.sample()
+    expect(s.right).toBe(true)
+    expect(s.left).toBe(false)
+  })
+})

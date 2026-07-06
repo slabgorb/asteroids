@@ -13,6 +13,7 @@
 // tempest's `createInputController(target)` pattern.
 
 import type { Input } from '../core/input'
+import { DEFAULT_TUNING, type RotationTuning } from './tuning'
 
 export interface InputController {
   /** A fresh Input reflecting the keys held this instant. */
@@ -51,12 +52,28 @@ export function shouldEmitRotate(framesHeld: number, delayFrames: number): boole
   return framesHeld > delayFrames
 }
 
-export function createInputController(target: HTMLElement): InputController {
+export function createInputController(
+  target: HTMLElement,
+  tuning: RotationTuning = DEFAULT_TUNING,
+): InputController {
   const held = new Set<string>()
   let mouseFireHeld = false
   let mouseHyperspaceHeld = false
 
+  // Tap-to-nudge state (A-20): consecutive sim-frames each rotate direction has
+  // been held, advanced by sample() ticks (NOT wall-clock). The *Edge latches a
+  // rising keydown so a tap that presses AND releases between two samples still
+  // lands exactly one nudge frame.
+  let leftFrames = 0
+  let rightFrames = 0
+  let leftEdge = false
+  let rightEdge = false
+
   window.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (!held.has(e.code)) {
+      if ((KEYS.left as readonly string[]).includes(e.code)) leftEdge = true
+      if ((KEYS.right as readonly string[]).includes(e.code)) rightEdge = true
+    }
     held.add(e.code)
     if (SCROLL_KEYS.has(e.code)) e.preventDefault()
   })
@@ -84,11 +101,30 @@ export function createInputController(target: HTMLElement): InputController {
 
   const any = (codes: readonly string[]): boolean => codes.some((c) => held.has(c))
 
+  // Advance one rotate direction's frame counter for this sample and decide its
+  // output. Held → increment (0→1 is the press edge, which nudges). Not held but
+  // an edge latched since the last sample (sub-frame tap) → force a one-frame
+  // nudge. Otherwise → released, reset to rest.
+  const rotate = (
+    codes: readonly string[],
+    frames: number,
+    edge: boolean,
+  ): { frames: number; out: boolean } => {
+    const next = any(codes) ? frames + 1 : edge ? 1 : 0
+    return { frames: next, out: shouldEmitRotate(next, tuning.tapHoldDelayFrames) }
+  }
+
   return {
     sample(): Input {
+      const l = rotate(KEYS.left, leftFrames, leftEdge)
+      const r = rotate(KEYS.right, rightFrames, rightEdge)
+      leftFrames = l.frames
+      rightFrames = r.frames
+      leftEdge = false
+      rightEdge = false
       return {
-        left: any(KEYS.left),
-        right: any(KEYS.right),
+        left: l.out,
+        right: r.out,
         thrust: any(KEYS.thrust),
         fire: any(KEYS.fire) || mouseFireHeld,
         hyperspace: any(KEYS.hyperspace) || mouseHyperspaceHeld,
