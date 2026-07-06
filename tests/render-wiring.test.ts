@@ -80,6 +80,19 @@ describe('render.ts — draws every live entity class, not just the ship (playfi
       'render.ts must draw state.shipDebris',
     ).toBe(true)
   })
+
+  // A2-8: the renderer grows another entity class (shrapnel — the dim, short-lived
+  // scatter on every rock break). Mirror the shipDebris wiring guard so a mutant
+  // dropping the drawShrapnel call is caught. The dots' exact "dim" brightness is a
+  // render-fidelity / playtest knob, eyeball-verified per this file's header — this
+  // only pins that the scatter is actually drawn.
+  it('reads state.shrapnel — the rock-break debris scatter must be drawn', () => {
+    expect(existsSync(RENDER)).toBe(true)
+    expect(
+      /\bstate\.shrapnel\b/.test(read(RENDER)),
+      'render.ts must draw state.shrapnel',
+    ).toBe(true)
+  })
 })
 
 describe('main.ts — wires the renderer and real input (AC-1, AC-5)', () => {
