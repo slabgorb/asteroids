@@ -17,7 +17,7 @@
 // mouse support is bolted on.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { createInputController } from '../src/shell/input'
+import { createInputController, shouldEmitRotate } from '../src/shell/input'
 
 function makeBus() {
   const handlers: Record<string, ((e: unknown) => void)[]> = {}
@@ -199,5 +199,25 @@ describe('createInputController — window blur releases held mouse buttons (gua
     const sample = ctrl.sample()
     expect(sample.fire, 'blur must release a held left button').toBe(false)
     expect(sample.hyperspace, 'blur must release a held right button').toBe(false)
+  })
+})
+
+describe('shouldEmitRotate — tap vs hold decision (A-20)', () => {
+  const DELAY = 12
+  it('emits nothing when the key is not held', () => {
+    expect(shouldEmitRotate(0, DELAY)).toBe(false)
+    expect(shouldEmitRotate(-1, DELAY)).toBe(false)
+  })
+  it('emits a single nudge on the press frame', () => {
+    expect(shouldEmitRotate(1, DELAY)).toBe(true)
+  })
+  it('stays silent through the hold-delay dwell', () => {
+    for (let f = 2; f <= DELAY; f++) {
+      expect(shouldEmitRotate(f, DELAY), `frame ${f} should dwell`).toBe(false)
+    }
+  })
+  it('emits continuously once held past the delay', () => {
+    expect(shouldEmitRotate(DELAY + 1, DELAY)).toBe(true)
+    expect(shouldEmitRotate(DELAY + 50, DELAY)).toBe(true)
   })
 })

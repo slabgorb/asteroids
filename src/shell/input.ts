@@ -38,6 +38,19 @@ const SCROLL_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 
 
 const MOUSE_BUTTON = { left: 0, right: 2 } as const
 
+/** Given how many consecutive sim-frames a rotate key has been held (0 = not
+ * held, 1 = the frame it was first seen down), decide whether to emit rotation
+ * this frame: one nudge on the press edge, silence through the hold-delay, then
+ * continuous rotation once the key is held past the delay. This is what turns a
+ * keyboard tap into a single ROM step while a hold still spins continuously
+ * (A-20). Frames are counted by sample() ticks, so the decision is deterministic
+ * in sim time, not wall-clock. */
+export function shouldEmitRotate(framesHeld: number, delayFrames: number): boolean {
+  if (framesHeld <= 0) return false
+  if (framesHeld === 1) return true
+  return framesHeld > delayFrames
+}
+
 export function createInputController(target: HTMLElement): InputController {
   const held = new Set<string>()
   let mouseFireHeld = false
