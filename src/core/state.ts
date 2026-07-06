@@ -78,6 +78,19 @@ export interface ShipDebrisSegment {
   life: number
 }
 
+/** A2-8: one dot of the rock-break shrapnel scatter (core/shrapnel.ts). The ROM
+ * draws this dim, short-lived burst on EVERY object explosion. `pos` is the dot's
+ * world-space position (it starts at the impact point and spreads outward);
+ * `vel` is world-units per 60 Hz frame (the Ship.vel/Rock.velocity unit) — a
+ * small outward drift, NOT the destroyed rock's velocity, so the burst stays
+ * anchored; `life` is remaining seconds before the dot is dropped. A POINT, not
+ * a p1/p2 segment (contrast ShipDebrisSegment). */
+export interface Shrapnel {
+  pos: Vec2
+  vel: Vec2
+  life: number
+}
+
 /** A saucer's size tier. The LARGE variant (A-11) crosses and fires at random
  * headings; the SMALL variant (A-12) aims at the ship with an accuracy that
  * ramps up with the score. A-13 scores the two differently (200 vs 990/1000)
@@ -149,6 +162,10 @@ export interface GameState {
    * Purely cosmetic — never consulted by collision or the respawn clear-zone
    * check (lives.ts isCenterClear). */
   shipDebris: ShipDebrisSegment[]
+  /** A2-8: the rock-break shrapnel scatter, live between a rock's destruction and
+   * its full fade. Purely cosmetic — never consulted by collision or the respawn
+   * clear-zone check. Spawned RNG-free so a break never perturbs the spawn stream. */
+  shrapnel: Shrapnel[]
   saucer: Saucer | null
   /** Previous frame's fire-button state — the shift-register debounce that makes
    * firing edge-triggered (A-4, ShipBulletSR $63): a shot spawns only on a fresh
@@ -232,6 +249,8 @@ export function initialState(seed: number = DEFAULT_SEED): GameState {
     bullets: [],
     // No ship has died yet at boot (A2-5).
     shipDebris: [],
+    // No rock has broken yet at boot (A2-8).
+    shrapnel: [],
     saucer: null,
     // Fire not held at boot, so the very first press reads as a rising edge.
     firePrev: false,

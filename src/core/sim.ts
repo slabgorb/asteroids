@@ -18,6 +18,7 @@ import { stepShip, SHIP_HITBOX } from './ship'
 import { stepBullets } from './bullet'
 import { updateRocks, splitRock, ROCK_HITBOX } from './rocks'
 import { breakShip, updateShipDebris } from './shipDebris'
+import { spawnShrapnel, updateShrapnel } from './shrapnel'
 import { updateWaveDirector } from './waves'
 import { updateSpawnDirector, stepSaucer, SAUCER_HITBOX, SAUCER_ROCK_COLLISION_ENABLED } from './saucer'
 import { applyScore, addScore, SAUCER_SCORE } from './score'
@@ -160,6 +161,10 @@ function stepAttract(state: GameState, input: Input, dt: number, startPressed: b
     // the following attract loop, and must not freeze there (a fresh cabinet's
     // debris is [], so this is a no-op unless a prior run left live segments).
     shipDebris: updateShipDebris(state.shipDebris, dt),
+    // A2-8: age rock-break shrapnel here too — a break just before a run-ending
+    // death can leave a scatter still animating into attract; it must keep fading,
+    // not freeze (the same cross-mode-aging rule as shipDebris).
+    shrapnel: updateShrapnel(state.shrapnel, dt),
     startPrev: input.start,
     events: [], // A-18: no gameplay-audio events in attract; never carry a stale frame's forward
   }
@@ -188,6 +193,9 @@ function stepGameOver(
     rng,
     tick: state.tick + 1,
     shipDebris: updateShipDebris(state.shipDebris, dt),
+    // A2-8: keep rock-break shrapnel fading through the GAME OVER card too (same
+    // cross-mode-aging rule as shipDebris — every branch below derives from base).
+    shrapnel: updateShrapnel(state.shrapnel, dt),
     startPrev: input.start,
     events: [],
   }
@@ -296,6 +304,7 @@ export function stepGame(inState: GameState, input: Input, dt: number): GameStat
 
   let rocks = updateRocks(state.rocks, dt, WORLD_BOUNDS)
   let shipDebris = updateShipDebris(state.shipDebris, dt)
+  let shrapnel = updateShrapnel(state.shrapnel, dt)
   let liveBullets: Bullet[] = bullets
   let score = state.score
   let lives = state.lives
@@ -342,6 +351,12 @@ export function stepGame(inState: GameState, input: Input, dt: number): GameStat
         // tier (children score/explode only when later shot). Restored here after
         // A-13's collision-loop restructure landed on top of A-18's event channel.
         events.push({ type: 'explosion', source: destroyed.size })
+        // A2-8: the visual twin of the explosion cue — every rock break (large,
+        // medium, AND the small tier that despawns with no children) scatters a
+        // dim, short-lived shrapnel burst at the break point. RNG-FREE by design
+        // (spawnShrapnel takes only a position): a break must not consume the
+        // rng clone, or it would shift the wave/saucer spawn stream (cf. A2-6).
+        shrapnel = [...shrapnel, ...spawnShrapnel(destroyed.pos)]
         working.splice(hit, 1, ...splitRock(destroyed, rng))
         continue // shot consumed by the rock
       }
@@ -434,6 +449,7 @@ export function stepGame(inState: GameState, input: Input, dt: number): GameStat
     rocks,
     bullets: liveBullets,
     shipDebris,
+    shrapnel,
     saucer,
     score,
     lives,
