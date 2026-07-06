@@ -166,6 +166,12 @@ export interface GameState {
    * its full fade. Purely cosmetic — never consulted by collision or the respawn
    * clear-zone check. Spawned RNG-free so a break never perturbs the spawn stream. */
   shrapnel: Shrapnel[]
+  /** A-21: the saucer's breakup debris, live between a destroyed saucer and its
+   * full fade — the same drifting/fading line segments the ship fractures into
+   * (ShipDebrisSegment reused). Spawned RNG-FREE (a saucer death must not perturb
+   * the wave/saucer spawn stream, cf. shrapnel/A2-8). Purely cosmetic — never
+   * consulted by collision or the respawn clear-zone check (lives.ts isCenterClear). */
+  saucerDebris: ShipDebrisSegment[]
   saucer: Saucer | null
   /** Previous frame's fire-button state — the shift-register debounce that makes
    * firing edge-triggered (A-4, ShipBulletSR $63): a shot spawns only on a fresh
@@ -251,6 +257,8 @@ export function initialState(seed: number = DEFAULT_SEED): GameState {
     shipDebris: [],
     // No rock has broken yet at boot (A2-8).
     shrapnel: [],
+    // No saucer has been destroyed yet at boot (A-21).
+    saucerDebris: [],
     saucer: null,
     // Fire not held at boot, so the very first press reads as a rising edge.
     firePrev: false,

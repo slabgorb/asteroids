@@ -30,7 +30,9 @@ import {
 } from '../core/state'
 import { ROCK_HITBOX } from '../core/rocks'
 import { shipHeading, shipVertices, SHIP_TAIL } from '../core/shipShape'
+import { saucerPolylines } from '../core/saucerShape'
 import { DEBRIS_LIFETIME_S } from '../core/shipDebris'
+import { SAUCER_DEBRIS_LIFETIME_S } from '../core/saucerDebris'
 import { SHRAPNEL_LIFETIME_S } from '../core/shrapnel'
 import { formatScore } from '../core/score'
 import type { Input } from '../core/input'
@@ -108,15 +110,10 @@ const ROCK_VARIANTS: ReadonlyArray<ReadonlyArray<readonly [number, number]>> = [
 // dot at our line weight. Radius in world lo-units (~2 screen px at 1024-wide).
 const BULLET_RADIUS = 16
 
-// Large-saucer silhouette dimensions, world lo-units — the classic lens hull
-// with a domed canopy, a shade under twice the ship's width. Visual-only until
-// A-13 lands saucer collisions; A-17 ports exact tables. y is world-up.
-const SAUCER_HALF_W = 140
-const SAUCER_HULL_TOP = 44
-const SAUCER_HULL_BOTTOM = -40
-const SAUCER_HULL_SHOULDER = 56
-const SAUCER_CANOPY_HALF_W = 30
-const SAUCER_CANOPY_TOP = 78
+// Saucer silhouette dimensions (SAUCER_HALF_W/HULL_*/CANOPY_*) live in
+// core/saucerShape.ts now — A-21's core/saucerDebris.ts fractures the SAME shape
+// this file renders, so the geometry is hoisted to one shared source rather than
+// two independently-tuned copies (see saucerShape.ts / shipShape.ts headers).
 
 // Ship hull dimensions (NOSE/TAIL/HALF_WIDTH/NOTCH) live in core/shipShape.ts
 // now — A2-5's core/shipDebris.ts needs the SAME geometry to fracture the
@@ -222,6 +219,32 @@ function drawShipDebris(
   }
 }
 
+/** A-21: the saucer's breakup debris — each surviving segment as an independent
+ *  glowing line, alpha-faded by its remaining life fraction, exactly like the
+ *  ship debris (drawShipDebris) but keyed off SAUCER_DEBRIS_LIFETIME_S. */
+function drawSaucerDebris(
+  ctx: CanvasRenderingContext2D,
+  segments: readonly ShipDebrisSegment[],
+  view: View,
+): void {
+  for (const seg of segments) {
+    const alpha = Math.max(0, Math.min(1, seg.life / SAUCER_DEBRIS_LIFETIME_S))
+    const [sx1, sy1] = toScreen(seg.p1.x, seg.p1.y, view)
+    const [sx2, sy2] = toScreen(seg.p2.x, seg.p2.y, view)
+    ctx.save()
+    ctx.globalAlpha = alpha
+    ctx.strokeStyle = SHIP_COLOR
+    ctx.shadowColor = SHIP_COLOR
+    ctx.shadowBlur = GLOW_BLUR
+    ctx.lineWidth = LINE_WIDTH
+    ctx.beginPath()
+    ctx.moveTo(sx1, sy1)
+    ctx.lineTo(sx2, sy2)
+    ctx.stroke()
+    ctx.restore()
+  }
+}
+
 /** A2-8: the rock-break shrapnel (core/shrapnel.ts) — each dot a dim, glowing
  *  point that fades with its life. Deliberately DIMMER than the ship debris:
  *  the ROM lights shrapnel at intensity b=7 vs the ship fragments' b=12, so a
@@ -284,48 +307,19 @@ function drawBullet(ctx: CanvasRenderingContext2D, bullet: Bullet, view: View): 
 }
 
 /** The large saucer (A-11): lens-shaped hull, domed canopy, and the waistline
- *  seam across the widest point. Axis-aligned — the saucer never banks. */
+ *  seam across the widest point. Axis-aligned — the saucer never banks. Strokes
+ *  the shared saucerPolylines (core/saucerShape.ts) — the SAME geometry A-21's
+ *  breakSaucer fractures on death, by construction. */
 function drawSaucer(ctx: CanvasRenderingContext2D, saucer: Saucer, view: View): void {
-  const { x, y } = saucer.pos
-  // Hull: the closed six-point lens.
-  strokePoly(
-    ctx,
-    [
-      [x - SAUCER_HALF_W, y],
-      [x - SAUCER_HULL_SHOULDER, y + SAUCER_HULL_TOP],
-      [x + SAUCER_HULL_SHOULDER, y + SAUCER_HULL_TOP],
-      [x + SAUCER_HALF_W, y],
-      [x + SAUCER_HULL_SHOULDER, y + SAUCER_HULL_BOTTOM],
-      [x - SAUCER_HULL_SHOULDER, y + SAUCER_HULL_BOTTOM],
-    ],
-    view,
-    SHIP_COLOR,
-    true,
-  )
-  // Canopy: an open dome sitting on the hull top.
-  strokePoly(
-    ctx,
-    [
-      [x - SAUCER_HULL_SHOULDER, y + SAUCER_HULL_TOP],
-      [x - SAUCER_CANOPY_HALF_W, y + SAUCER_CANOPY_TOP],
-      [x + SAUCER_CANOPY_HALF_W, y + SAUCER_CANOPY_TOP],
-      [x + SAUCER_HULL_SHOULDER, y + SAUCER_HULL_TOP],
-    ],
-    view,
-    SHIP_COLOR,
-    false,
-  )
-  // Waistline: the seam across the widest point.
-  strokePoly(
-    ctx,
-    [
-      [x - SAUCER_HALF_W, y],
-      [x + SAUCER_HALF_W, y],
-    ],
-    view,
-    SHIP_COLOR,
-    false,
-  )
+  for (const { points, closed } of saucerPolylines(saucer)) {
+    strokePoly(
+      ctx,
+      points.map((p) => [p.x, p.y] as const),
+      view,
+      SHIP_COLOR,
+      closed,
+    )
+  }
 }
 
 /** One glowing HUD text run at a screen-space position. */
@@ -445,6 +439,7 @@ export function render(
   if (state.saucer) drawSaucer(ctx, state.saucer, view)
   for (const bullet of state.bullets) drawBullet(ctx, bullet, view)
   drawShipDebris(ctx, state.shipDebris, view)
+  drawSaucerDebris(ctx, state.saucerDebris, view)
   drawShrapnel(ctx, state.shrapnel, view)
   // A-14: `ship.visible` is false while a hyperspace jump is in flight — the ship
   // (and its flame) vanish for the reappearance window, then pop back at the new
