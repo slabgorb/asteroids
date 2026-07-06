@@ -13,6 +13,8 @@ import { initialState, type GameState } from './core/state'
 import { stepGame, enterInitial } from './core/sim'
 import type { Input } from './core/input'
 import { createInputController } from './shell/input'
+import { createTuning, loadTuning } from './shell/tuning'
+import { mountTuningPanel } from './shell/tuning-panel'
 import { render } from './shell/render'
 import { loadHighScores, saveHighScores } from './shell/storage'
 import { loadVectorFont } from './shell/font'
@@ -38,7 +40,8 @@ function resize(): void {
 window.addEventListener('resize', resize)
 resize()
 
-const input = createInputController(canvas)
+const tuning = createTuning(loadTuning())
+const input = createInputController(canvas, tuning)
 const audio = createAudioEngine()
 // Browsers forbid starting an AudioContext before a user gesture, so the engine
 // stays inert until the first click/keypress unlocks it. resume() is idempotent,
@@ -70,7 +73,7 @@ const loop = createLoop(
   (dt) => {
     frameInput = input.sample()
     const table = state.highScoreTable
-    state = stepGame(state, frameInput, dt)
+    state = stepGame(state, frameInput, dt, tuning.turnRate)
     // One sound per gameplay event the core emitted this frame (A-18). The
     // dispatch table lives in the pure, unit-tested shell/audio-dispatch
     // module so the wiring is tested behaviourally, not by a source text-match.
@@ -87,3 +90,6 @@ const loop = createLoop(
   },
 )
 loop.start()
+
+// A-20 dev-only rotation tuner: never mounted for normal players.
+if (new URLSearchParams(location.search).has('tune')) mountTuningPanel(tuning)
