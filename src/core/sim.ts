@@ -240,7 +240,12 @@ export function enterInitial(state: GameState, char: string): GameState {
   return { ...state, gameOver: { ...over, initials: over.initials + char.toUpperCase() } }
 }
 
-export function stepGame(inState: GameState, input: Input, dt: number): GameState {
+export function stepGame(
+  inState: GameState,
+  input: Input,
+  dt: number,
+  turnRate?: number,
+): GameState {
   // `state` is rebindable: A-14 rebinds it to the post-hyperspace state below,
   // so the rest of the step (collisions, death, respawn) reads the jumped ship.
   let state = inState
@@ -283,7 +288,7 @@ export function stepGame(inState: GameState, input: Input, dt: number): GameStat
   //
   // Fire in the direction the ship now faces, inheriting its updated velocity.
   const shipAlive = !state.shipDestroyed
-  const ship = shipAlive ? stepShip(state.ship, input, dt) : state.ship
+  const ship = shipAlive ? stepShip(state.ship, input, dt, turnRate) : state.ship
   const { bullets, firePrev, fired } = stepBullets(
     state.bullets,
     ship,
