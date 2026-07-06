@@ -4,7 +4,7 @@
 // defensive localStorage seam (mirrors storage.ts): every unhappy path degrades
 // to defaults so a corrupt/absent/unavailable store never breaks boot.
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { DEFAULT_TUNING, createTuning, loadTuning, saveTuning } from '../src/shell/tuning'
 import { SHIP_ROTATION_RATE } from '../src/core/ship'
 
