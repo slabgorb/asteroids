@@ -257,3 +257,58 @@ describe('render — ship breakup debris (A2-5)', () => {
     expect(dim.strokeAlphas[0]).toBeLessThan(bright.strokeAlphas[0])
   })
 })
+
+// A-21: the saucer death breakup grows a new stroked entity class
+// (saucerDebris), mirroring A2-5's ship breakup. Pre-empts the exact Reviewer
+// finding A2-5 drew (drawShipDebris had zero coverage). `shipDestroyed: true`
+// (plus the default lives:0 / empty rocks/bullets / null saucer from
+// initialState) suppress every OTHER stroked entity, so `segments`/`strokeAlphas`
+// isolate the saucer debris alone. Deliberately does NOT import from
+// ../src/core/saucerDebris — that module does not exist yet, and importing it
+// would fail the whole file to load; the `saucerDebris` field reference is
+// runtime-safe (an extra property under esbuild), and the pre-A-21 renderer
+// simply strokes nothing for it -> RED until drawSaucerDebris is wired.
+describe('render — saucer breakup debris (A-21)', () => {
+  // Return type carries the not-yet-declared `saucerDebris` field explicitly, so
+  // this fixture type-checks without an `as any`/`as unknown` escape (TS #1) and
+  // `mode: 'playing'` stays contextually typed. Once Dev adds saucerDebris to
+  // GameState the intersection collapses to plain GameState — no churn.
+  function saucerDebrisState(
+    segments: ShipDebrisSegment[],
+  ): GameState & { saucerDebris: ShipDebrisSegment[] } {
+    const s = initialState(1979)
+    return { ...s, mode: 'playing', shipDestroyed: true, saucer: null, saucerDebris: segments }
+  }
+
+  const segAt = (life: number): ShipDebrisSegment => ({
+    p1: { x: 4000, y: 3000 },
+    p2: { x: 4100, y: 3000 },
+    vel: { x: 0, y: 0 },
+    life,
+  })
+
+  it('draws each saucer-debris segment as a stroked line', () => {
+    const { ctx, segments } = makeCtx()
+    render(ctx, saucerDebrisState([segAt(1), segAt(1)]), W, H, NO_INPUT)
+    expect(segments.length).toBe(2) // one moveTo->lineTo per segment
+  })
+
+  it('draws nothing when there is no saucer debris', () => {
+    const { ctx, segments } = makeCtx()
+    render(ctx, saucerDebrisState([]), W, H, NO_INPUT)
+    expect(segments.length).toBe(0)
+  })
+
+  it('fades a segment out — less remaining life strokes at lower alpha', () => {
+    // Alpha is monotonic in remaining life (life/lifetime), so more life must
+    // stroke brighter regardless of the exact SAUCER_DEBRIS_LIFETIME_S value.
+    const bright = makeCtx()
+    render(bright.ctx, saucerDebrisState([segAt(1)]), W, H, NO_INPUT)
+    const dim = makeCtx()
+    render(dim.ctx, saucerDebrisState([segAt(0.1)]), W, H, NO_INPUT)
+
+    expect(bright.strokeAlphas).toHaveLength(1)
+    expect(dim.strokeAlphas).toHaveLength(1)
+    expect(dim.strokeAlphas[0]).toBeLessThan(bright.strokeAlphas[0])
+  })
+})

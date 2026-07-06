@@ -18,6 +18,7 @@ import { stepShip, SHIP_HITBOX } from './ship'
 import { stepBullets } from './bullet'
 import { updateRocks, splitRock, ROCK_HITBOX } from './rocks'
 import { breakShip, updateShipDebris } from './shipDebris'
+import { breakSaucer } from './saucerDebris'
 import { spawnShrapnel, updateShrapnel } from './shrapnel'
 import { updateWaveDirector } from './waves'
 import { updateSpawnDirector, stepSaucer, SAUCER_HITBOX, SAUCER_ROCK_COLLISION_ENABLED } from './saucer'
@@ -165,6 +166,9 @@ function stepAttract(state: GameState, input: Input, dt: number, startPressed: b
     // death can leave a scatter still animating into attract; it must keep fading,
     // not freeze (the same cross-mode-aging rule as shipDebris).
     shrapnel: updateShrapnel(state.shrapnel, dt),
+    // A-21: age saucer-death debris here too — a saucer killed just before a
+    // run-ending death can leave wreckage animating into attract; same rule.
+    saucerDebris: updateShipDebris(state.saucerDebris, dt),
     startPrev: input.start,
     events: [], // A-18: no gameplay-audio events in attract; never carry a stale frame's forward
   }
@@ -196,6 +200,8 @@ function stepGameOver(
     // A2-8: keep rock-break shrapnel fading through the GAME OVER card too (same
     // cross-mode-aging rule as shipDebris — every branch below derives from base).
     shrapnel: updateShrapnel(state.shrapnel, dt),
+    // A-21: keep saucer-death debris fading through the GAME OVER card too.
+    saucerDebris: updateShipDebris(state.saucerDebris, dt),
     startPrev: input.start,
     events: [],
   }
@@ -309,6 +315,7 @@ export function stepGame(
 
   let rocks = updateRocks(state.rocks, dt, WORLD_BOUNDS)
   let shipDebris = updateShipDebris(state.shipDebris, dt)
+  let saucerDebris = updateShipDebris(state.saucerDebris, dt)
   let shrapnel = updateShrapnel(state.shrapnel, dt)
   let liveBullets: Bullet[] = bullets
   let score = state.score
@@ -375,6 +382,9 @@ export function stepGame(
         const awarded = addScore(score, lives, SAUCER_SCORE[saucer.size])
         score = awarded.score
         lives = awarded.lives
+        // A-21: fracture the saucer into drifting/fading debris (RNG-FREE, so the
+        // spawn stream is untouched) BEFORE nulling it — the visual twin of a kill.
+        saucerDebris = [...saucerDebris, ...breakSaucer(saucer)]
         saucer = null // saucer destroyed by the shot
         continue // shot consumed
       }
@@ -403,7 +413,11 @@ export function stepGame(
     const rammedSaucer = sc !== null && overlaps(ship.pos, sc.pos, SHIP_HITBOX + SAUCER_HITBOX[sc.size])
     if (rammedRock || rammedSaucer || shipHitBySaucerShot) {
       shipDestroyed = true
-      if (rammedSaucer) saucer = null // mutual destruction
+      if (rammedSaucer && sc !== null) {
+        // A-21: mutual destruction — the saucer breaks up too (RNG-FREE).
+        saucerDebris = [...saucerDebris, ...breakSaucer(sc)]
+        saucer = null
+      }
     }
   }
 
@@ -415,7 +429,12 @@ export function stepGame(
     const rammedByRock = rocks.some((r) =>
       overlaps(scForRock.pos, r.pos, SAUCER_HITBOX[scForRock.size] + ROCK_HITBOX[r.size]),
     )
-    if (rammedByRock) saucer = null
+    if (rammedByRock) {
+      // A-21: a rock kill fractures the saucer too (RNG-FREE, so state.rng.seed
+      // is untouched — the wave/saucer spawn stream must not shift on a death).
+      saucerDebris = [...saucerDebris, ...breakSaucer(scForRock)]
+      saucer = null
+    }
   }
   // The destruction EDGE (not the sticky latch) is the explosion cue — fires
   // regardless of the lives-0 legacy niche (handleShipDeath's own guard,
@@ -454,6 +473,7 @@ export function stepGame(
     rocks,
     bullets: liveBullets,
     shipDebris,
+    saucerDebris,
     shrapnel,
     saucer,
     score,

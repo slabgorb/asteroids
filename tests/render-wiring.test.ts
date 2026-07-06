@@ -93,6 +93,36 @@ describe('render.ts — draws every live entity class, not just the ship (playfi
       'render.ts must draw state.shrapnel',
     ).toBe(true)
   })
+
+  // A-21: the saucer death breakup adds another entity class (saucerDebris — the
+  // drifting, fading line segments a destroyed saucer fractures into). Mirror the
+  // shipDebris/shrapnel wiring guards so a mutant dropping the draw call is caught.
+  it('reads state.saucerDebris — the saucer breakup debris must be drawn', () => {
+    expect(existsSync(RENDER)).toBe(true)
+    expect(
+      /\bstate\.saucerDebris\b/.test(read(RENDER)),
+      'render.ts must draw state.saucerDebris',
+    ).toBe(true)
+  })
+
+  // A-21: the saucer geometry must be a SINGLE SOURCE shared by the renderer and
+  // the pure-core breakup (core/saucerDebris.ts fractures the exact rendered
+  // shape). Like A2-5's shipShape.ts, it is hoisted into core/saucerShape.ts and
+  // imported here — render.ts must NOT keep a private copy of the constants, or
+  // the two silhouettes silently tune apart ("one function, not two parallel
+  // copies" — bounds.ts's precedent).
+  it('sources saucer geometry from core/saucerShape — no private copy of the constants', () => {
+    expect(existsSync(RENDER)).toBe(true)
+    const src = read(RENDER)
+    expect(
+      /from\s*['"]\.\.\/core\/saucerShape['"]/.test(src),
+      "render.ts must import the saucer geometry from '../core/saucerShape'",
+    ).toBe(true)
+    expect(
+      /\bconst\s+SAUCER_HALF_W\s*=/.test(src),
+      'render.ts must not locally redeclare SAUCER_HALF_W — it belongs to core/saucerShape now',
+    ).toBe(false)
+  })
 })
 
 describe('main.ts — wires the renderer and real input (AC-1, AC-5)', () => {
