@@ -26,10 +26,12 @@ import {
   type Bullet,
   type Saucer,
   type ShipDebrisSegment,
+  type Shrapnel,
 } from '../core/state'
 import { ROCK_HITBOX } from '../core/rocks'
 import { shipHeading, shipVertices, SHIP_TAIL } from '../core/shipShape'
 import { DEBRIS_LIFETIME_S } from '../core/shipDebris'
+import { SHRAPNEL_LIFETIME_S } from '../core/shrapnel'
 import { formatScore } from '../core/score'
 import type { Input } from '../core/input'
 import { marginRects, fitScale } from './margin'
@@ -216,6 +218,34 @@ function drawShipDebris(
     ctx.moveTo(sx1, sy1)
     ctx.lineTo(sx2, sy2)
     ctx.stroke()
+    ctx.restore()
+  }
+}
+
+/** A2-8: the rock-break shrapnel (core/shrapnel.ts) — each dot a dim, glowing
+ *  point that fades with its life. Deliberately DIMMER than the ship debris:
+ *  the ROM lights shrapnel at intensity b=7 vs the ship fragments' b=12, so a
+ *  low peak alpha (SHRAPNEL_DIM) reads as the "dim, subtle scatter" the story
+ *  asks for. Exact dim/size are feel values, calibrated by eye in the dev
+ *  server per the render house convention. */
+const SHRAPNEL_DIM = 0.55 // peak alpha at full life — below the ship debris' 1.0
+const SHRAPNEL_DOT_RADIUS = 1.5 // screen px; a small glowing point
+function drawShrapnel(
+  ctx: CanvasRenderingContext2D,
+  particles: readonly Shrapnel[],
+  view: View,
+): void {
+  for (const p of particles) {
+    const alpha = SHRAPNEL_DIM * Math.max(0, Math.min(1, p.life / SHRAPNEL_LIFETIME_S))
+    const [sx, sy] = toScreen(p.pos.x, p.pos.y, view)
+    ctx.save()
+    ctx.globalAlpha = alpha
+    ctx.fillStyle = SHIP_COLOR
+    ctx.shadowColor = SHIP_COLOR
+    ctx.shadowBlur = GLOW_BLUR
+    ctx.beginPath()
+    ctx.arc(sx, sy, SHRAPNEL_DOT_RADIUS, 0, Math.PI * 2)
+    ctx.fill()
     ctx.restore()
   }
 }
@@ -415,6 +445,7 @@ export function render(
   if (state.saucer) drawSaucer(ctx, state.saucer, view)
   for (const bullet of state.bullets) drawBullet(ctx, bullet, view)
   drawShipDebris(ctx, state.shipDebris, view)
+  drawShrapnel(ctx, state.shrapnel, view)
   // A-14: `ship.visible` is false while a hyperspace jump is in flight — the ship
   // (and its flame) vanish for the reappearance window, then pop back at the new
   // spot. Skipping the draw here is the whole visual of a hyperspace jump.
