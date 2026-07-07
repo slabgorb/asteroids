@@ -17,7 +17,7 @@
 // Contract pinned here (context-story-A-16.md, Technical Approach + ACs):
 //  - GameState carries `gameOver: GameOverPhase | null` (null outside
 //    'gameover' — A-2's Mode union is NOT extended) and
-//    `highScoreTable: HighScoreEntry[]` (loaded by the shell at boot).
+//    `highScoreTable: HighScoreEntry<'wave'>[]` (loaded by the shell at boot).
 //  - 'attract': rocks drift via the EXISTING A-6 movement (pinned by equality
 //    with updateRocks, not golden values); ship/bullets/score/lives are inert
 //    regardless of held gameplay inputs; input.start begins a fresh game using
@@ -34,7 +34,7 @@ import { describe, it, expect } from 'vitest'
 import { stepGame } from '../src/core/sim'
 import { initialState, WORLD_W, WORLD_H, type GameState } from '../src/core/state'
 import { NO_INPUT, type Input } from '../src/core/input'
-import type { HighScoreEntry } from '../src/core/highscore'
+import type { HighScoreEntry } from '@arcade/shared/highscore'
 import { spawnRocks, updateRocks } from '../src/core/rocks'
 import { createRng, nextFloat } from '@arcade/shared/rng'
 import type { Bounds } from '../src/core/bounds'
@@ -83,7 +83,7 @@ function playingState(seed = 7): GameState {
  * ship. The next step latches shipDestroyed and must enter 'gameover'. */
 function aboutToDie(
   score: number,
-  table: HighScoreEntry[] = [],
+  table: HighScoreEntry<'wave'>[] = [],
   seed = 11,
   lives = 1,
 ): GameState {
@@ -213,7 +213,7 @@ describe("stepGame — start press ('attract' -> 'playing')", () => {
   })
 
   it('preserves the persisted high-score table across the reset', () => {
-    const table: HighScoreEntry[] = [{ name: 'AAA', score: 900, wave: 1 }]
+    const table: HighScoreEntry<'wave'>[] = [{ name: 'AAA', score: 900, wave: 1 }]
     const s0: GameState = { ...attractWithRocks(), highScoreTable: table }
     const s1 = stepGame(s0, START, DT)
     expect(s1.highScoreTable).toEqual(table)
@@ -262,7 +262,7 @@ describe("stepGame — 'gameover' entry (destruction with no reserves ends the r
   })
 
   it('computes qualifies=false when a full board is not strictly beaten', () => {
-    const fullBoard: HighScoreEntry[] = Array.from({ length: 10 }, (_, i) => ({
+    const fullBoard: HighScoreEntry<'wave'>[] = Array.from({ length: 10 }, (_, i) => ({
       name: `E${i}`,
       score: (10 - i) * 1000, // lowest = 1000
       wave: 1,

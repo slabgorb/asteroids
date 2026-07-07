@@ -25,7 +25,7 @@
 
 import type { GameState, Vec2 } from './state'
 import { WORLD_W, WORLD_H, GAME_OVER_DISPLAY_S } from './state'
-import { qualifiesForHighScore } from './highscore'
+import { qualifiesForHighScore } from '@arcade/shared/highscore'
 
 /** The respawn point: the world center (CenterShip, $0284/$02A7). */
 const CENTER: Vec2 = { x: WORLD_W / 2, y: WORLD_H / 2 }

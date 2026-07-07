@@ -16,10 +16,15 @@ import { createInputController } from './shell/input'
 import { createTuning, loadTuning } from './shell/tuning'
 import { mountTuningPanel } from './shell/tuning-panel'
 import { render } from './shell/render'
-import { loadHighScores, saveHighScores } from './shell/storage'
+import { makeHighScoreStorage, makeHighScoreRowGuard } from '@arcade/shared/highscore'
 import { loadVectorFont } from './shell/font'
 import { createAudioEngine } from './shell/audio'
 import { playEventSounds } from './shell/audio-dispatch'
+
+// asteroids records the `wave` reached; the shared factory binds load/save to the
+// 'asteroids-high-scores' localStorage key and validates each row's finite score +
+// wave (the lobby reads the same key + shape — SH-4).
+const highScoreStorage = makeHighScoreStorage('asteroids', makeHighScoreRowGuard('wave'))
 
 const canvas = document.getElementById('game') as HTMLCanvasElement
 const ctx = canvas.getContext('2d')!
@@ -54,7 +59,7 @@ window.addEventListener('keydown', unlockAudio)
 // Boot into attract for real (A-16 replaces A-11's provisional force-play shim):
 // the sim now owns the attract→start→gameover loop, and the persisted board is
 // threaded into core state where the qualify/insert logic reads it.
-let state: GameState = { ...initialState(), highScoreTable: loadHighScores() }
+let state: GameState = { ...initialState(), highScoreTable: highScoreStorage.load() }
 // Best-effort: the HUD falls back to the CSS stack until/unless the face loads.
 void loadVectorFont()
 // Initials entry (A-16): typed letters are edge events, not held state, so they
@@ -80,7 +85,7 @@ const loop = createLoop(
     playEventSounds(audio, state.events)
     // Persist the board the moment the core changes it (a confirmed entry) —
     // insertHighScore returns a NEW array, so reference identity is the signal.
-    if (state.highScoreTable !== table) saveHighScores(state.highScoreTable)
+    if (state.highScoreTable !== table) highScoreStorage.save(state.highScoreTable)
   },
   () => {
     ctx.save()
