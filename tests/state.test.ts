@@ -6,7 +6,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { initialState, type GameState } from '../src/core/state'
-import { createRng } from '../src/core/rng'
+import { createRng } from '@arcade/shared/rng'
 
 describe('initialState', () => {
   it('seeds rng via createRng(seed)', () => {

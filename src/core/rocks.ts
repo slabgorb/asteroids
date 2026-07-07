@@ -15,7 +15,7 @@
 
 import type { Rock, RockSize } from './state'
 import { wrapPosition, type Bounds } from './bounds'
-import { nextFloat, nextInt, type Rng } from './rng'
+import { nextFloat, nextInt, type Rng } from '@arcade/shared/rng'
 
 /** How many distinct rock outlines exist. Leans-confirmed at 4: a GetRandNum
  * read masked %00011000 (two random bits) near rock spawn/update code —

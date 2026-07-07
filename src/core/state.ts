@@ -8,7 +8,7 @@
 // minimal (a position, and for a rock a size tier) since flight/physics/
 // splitting/firing arrive in A-3+.
 
-import { createRng, type Rng } from './rng'
+import { createRng, type Rng } from '@arcade/shared/rng'
 import type { HighScoreTable } from './highscore'
 import type { GameEvent } from './events'
 

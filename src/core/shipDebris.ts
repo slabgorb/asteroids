@@ -7,7 +7,7 @@
 // bullet.ts's Bullet.life (countdown to removal) for lifetime.
 
 import type { Ship, ShipDebrisSegment, Vec2 } from './state'
-import { nextFloat, type Rng } from './rng'
+import { nextFloat, type Rng } from '@arcade/shared/rng'
 import { shipVertices } from './shipShape'
 
 /** Seconds a debris piece drifts before fading out. Feel-based provisional —
