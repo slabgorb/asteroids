@@ -168,8 +168,16 @@ describe('main.ts — wires the renderer and real input (AC-1, AC-5)', () => {
   it('wires the A-16 framing: persisted board in, board changes out, letters to enterInitial', () => {
     expect(existsSync(MAIN)).toBe(true)
     const src = read(MAIN)
-    expect(/\bloadHighScores\s*\(/.test(src), 'main.ts must load the board at boot').toBe(true)
-    expect(/\bsaveHighScores\s*\(/.test(src), 'main.ts must persist board changes').toBe(true)
+    // SH-4: the local load/saveHighScores were replaced by the shared
+    // makeHighScoreStorage factory (highScoreStorage.load()/.save()).
+    expect(
+      /highScoreStorage\.load\s*\(/.test(src),
+      'main.ts must load the board at boot',
+    ).toBe(true)
+    expect(
+      /highScoreStorage\.save\s*\(/.test(src),
+      'main.ts must persist board changes',
+    ).toBe(true)
     expect(/\benterInitial\s*\(/.test(src), 'main.ts must feed letters to enterInitial').toBe(true)
     expect(/\bloadVectorFont\s*\(/.test(src), 'main.ts must kick off the HUD font load').toBe(true)
   })

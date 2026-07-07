@@ -9,7 +9,7 @@
 // splitting/firing arrive in A-3+.
 
 import { createRng, type Rng } from '@arcade/shared/rng'
-import type { HighScoreTable } from './highscore'
+import type { HighScoreTable } from '@arcade/shared/highscore'
 import type { GameEvent } from './events'
 
 /** Screen-space position. 2D, top-down — no third axis in this cabinet. */
@@ -209,7 +209,7 @@ export interface GameState {
   /** A-16: the high-score board. The shell loads it from localStorage at boot
    * and persists it on change; inside the core it is ordinary deterministic
    * state (qualify on gameover entry, insert on confirm). */
-  highScoreTable: HighScoreTable
+  highScoreTable: HighScoreTable<'wave'>
   /** A-18: previous frame's thrust-button state — the same shift-register
    * debounce as firePrev/startPrev, so the shell can loop a sustained engine
    * hum spanning exactly the held interval instead of retriggering every
