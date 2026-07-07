@@ -13,7 +13,7 @@
 import type { GameState, Rock, Bullet, Vec2, Saucer } from './state'
 import { WORLD_W, WORLD_H, STARTING_LIVES, GAME_OVER_DISPLAY_S, initialState } from './state'
 import type { Input } from './input'
-import type { Rng } from './rng'
+import type { Rng } from '@arcade/shared/rng'
 import { stepShip, SHIP_HITBOX } from './ship'
 import { stepBullets } from './bullet'
 import { updateRocks, splitRock, ROCK_HITBOX } from './rocks'

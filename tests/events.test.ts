@@ -33,7 +33,7 @@ import {
 import { NO_INPUT } from '../src/core/input'
 import type { GameEvent } from '../src/core/events'
 import { HYPERSPACE_DEATH_CHANCE } from '../src/core/hyperspace'
-import { nextFloat } from '../src/core/rng'
+import { nextFloat } from '@arcade/shared/rng'
 
 const DT = 1 / 60
 

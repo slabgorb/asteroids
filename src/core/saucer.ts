@@ -25,7 +25,7 @@
 
 import type { GameState, Saucer, Bullet, Vec2, SaucerSize } from './state'
 import { WORLD_W, WORLD_H } from './state'
-import { nextFloat, nextInt, type Rng } from './rng'
+import { nextFloat, nextInt, type Rng } from '@arcade/shared/rng'
 
 /** Horizontal crossing speed, world lo-units per 60 Hz frame. The ROM applies its
  * ±16-unit saucer drift INSIDE the every-4th-frame saucer-update gate (UpdateScr

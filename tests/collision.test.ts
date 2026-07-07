@@ -41,7 +41,7 @@ import {
 import { NO_INPUT } from '../src/core/input'
 import { splitRock, ROCK_HITBOX } from '../src/core/rocks'
 import { breakShip } from '../src/core/shipDebris'
-import { createRng } from '../src/core/rng'
+import { createRng } from '@arcade/shared/rng'
 
 const DT = 1 / 60
 

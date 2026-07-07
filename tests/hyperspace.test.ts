@@ -30,7 +30,7 @@ import {
   triggerHyperspace,
 } from '../src/core/hyperspace'
 import { initialState, WORLD_W, WORLD_H, type GameState, type Ship } from '../src/core/state'
-import { nextFloat } from '../src/core/rng'
+import { nextFloat } from '@arcade/shared/rng'
 import { NO_INPUT, type Input } from '../src/core/input'
 import { stepGame } from '../src/core/sim'
 

@@ -36,7 +36,7 @@ import { initialState, WORLD_W, WORLD_H, type GameState } from '../src/core/stat
 import { NO_INPUT, type Input } from '../src/core/input'
 import type { HighScoreEntry } from '../src/core/highscore'
 import { spawnRocks, updateRocks } from '../src/core/rocks'
-import { createRng, nextFloat } from '../src/core/rng'
+import { createRng, nextFloat } from '@arcade/shared/rng'
 import type { Bounds } from '../src/core/bounds'
 
 const DT = 1 / 60

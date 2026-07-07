@@ -16,7 +16,7 @@
 import type { GameState, Rock, Vec2 } from './state'
 import { WORLD_W, WORLD_H } from './state'
 import type { Bounds } from './bounds'
-import { nextFloat, nextInt, type Rng } from './rng'
+import { nextFloat, nextInt, type Rng } from '@arcade/shared/rng'
 import { ROCK_SHAPE_VARIANT_COUNT, ROCK_SPEED_MIN, ROCK_SPEED_MAX } from './rocks'
 
 /** Wave-1 rock count, the per-wave increment, and the hard cap

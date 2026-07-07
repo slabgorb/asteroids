@@ -62,7 +62,7 @@ import {
   type Vec2,
   type Saucer,
 } from '../src/core/state'
-import { createRng, type Rng } from '../src/core/rng'
+import { createRng, type Rng } from '@arcade/shared/rng'
 import { stepGame } from '../src/core/sim'
 import { NO_INPUT } from '../src/core/input'
 

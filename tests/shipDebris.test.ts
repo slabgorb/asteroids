@@ -49,7 +49,7 @@ import {
   type Bullet,
   type Vec2,
 } from '../src/core/state'
-import { createRng } from '../src/core/rng'
+import { createRng } from '@arcade/shared/rng'
 import { stepGame, GAME_OVER_DISPLAY_S } from '../src/core/sim'
 import { NO_INPUT } from '../src/core/input'
 

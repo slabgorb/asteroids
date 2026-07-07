@@ -17,7 +17,7 @@
 import type { GameState, Vec2 } from './state'
 import { WORLD_W, WORLD_H } from './state'
 import type { Input } from './input'
-import { type Rng, nextFloat } from './rng'
+import { type Rng, nextFloat } from '@arcade/shared/rng'
 import type { Bounds } from './bounds'
 import { handleShipDeath } from './lives'
 

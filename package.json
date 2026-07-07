@@ -16,5 +16,8 @@
     "typescript": "^5.4.0",
     "vite": "^8.1.0",
     "vitest": "^4.1.9"
+  },
+  "dependencies": {
+    "@arcade/shared": "github:slabgorb/arcade-shared#v0.3.0"
   }
 }
