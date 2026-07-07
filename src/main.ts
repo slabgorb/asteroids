@@ -18,13 +18,13 @@ import { mountTuningPanel } from './shell/tuning-panel'
 import { render } from './shell/render'
 import { makeHighScoreStorage, makeHighScoreRowGuard } from '@arcade/shared/highscore'
 import { loadVectorFont } from './shell/font'
+import { createAudioEngine } from './shell/audio'
+import { playEventSounds } from './shell/audio-dispatch'
 
 // asteroids records the `wave` reached; the shared factory binds load/save to the
 // 'asteroids-high-scores' localStorage key and validates each row's finite score +
 // wave (the lobby reads the same key + shape — SH-4).
 const highScoreStorage = makeHighScoreStorage('asteroids', makeHighScoreRowGuard('wave'))
-import { createAudioEngine } from './shell/audio'
-import { playEventSounds } from './shell/audio-dispatch'
 
 const canvas = document.getElementById('game') as HTMLCanvasElement
 const ctx = canvas.getContext('2d')!
