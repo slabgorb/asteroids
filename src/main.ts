@@ -8,7 +8,7 @@
 // on a qualifying game-over, and any change to the board is written back to
 // localStorage (where the lobby tile reads it).
 
-import { createLoop } from './shell/loop'
+import { createLoop } from '@arcade/shared/loop'
 import { initialState, type GameState } from './core/state'
 import { stepGame, enterInitial } from './core/sim'
 import type { Input } from './core/input'
