@@ -18,6 +18,6 @@
     "vitest": "^4.1.9"
   },
   "dependencies": {
-    "@arcade/shared": "github:slabgorb/arcade-shared#v0.4.0"
+    "@arcade/shared": "github:slabgorb/arcade-shared#feat/SH-5-extract-loop-accumulator"
   }
 }
