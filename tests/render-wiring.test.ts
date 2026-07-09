@@ -179,6 +179,7 @@ describe('main.ts — wires the renderer and real input (AC-1, AC-5)', () => {
       'main.ts must persist board changes',
     ).toBe(true)
     expect(/\benterInitial\s*\(/.test(src), 'main.ts must feed letters to enterInitial').toBe(true)
-    expect(/\bloadVectorFont\s*\(/.test(src), 'main.ts must kick off the HUD font load').toBe(true)
+    // SH2-4 retired the TTF font load; main.ts no longer boots loadVectorFont
+    // (the inverse is pinned in tests/font-migration.test.ts).
   })
 })

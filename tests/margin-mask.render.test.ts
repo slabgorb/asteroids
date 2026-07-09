@@ -21,23 +21,51 @@
 //
 // RED until render() draws a margin mask.
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { render } from '../src/shell/render'
 import { WORLD_W, WORLD_H, initialState, type GameState, type Mode } from '../src/core/state'
 import { NO_INPUT } from '../src/core/input'
 
+// SH2-4: HUD text is stroked from @arcade/shared/font layoutText geometry, not
+// drawn via ctx.fillText. To keep the "mask before HUD text" ordering check, the
+// local ./font module is mocked so each layoutText call timestamps its order from
+// the SAME monotonic counter the ctx stub bumps on fillRect.
+const font = vi.hoisted(() => {
+  const order = { n: 0 }
+  const textOrders: number[] = []
+  return {
+    order,
+    textOrders,
+    layoutText(text: string, opts?: { letterSpacing?: number }) {
+      textOrders.push(order.n++)
+      const n = [...text].length
+      const sp = opts?.letterSpacing ?? 0
+      return { strokes: [{ points: [{ x: 0, y: 0 }, { x: 16, y: 0 }] }], width: 16 * n + sp * n }
+    },
+  }
+})
+
+vi.mock('../src/shell/font', () => ({
+  layoutText: font.layoutText,
+  CELL_W: 16,
+  CELL_H: 24,
+  hasGlyph: () => true,
+  charGlyph: () => ({ strokes: [], advance: 24 }),
+  GLYPH_CHARS: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-_,/',
+}))
+
 const EPS = 1e-6
 
 type FillRec = { x: number; y: number; w: number; h: number; style: string; alpha: number; order: number }
-type TextRec = { x: number; y: number; order: number }
 
-/** A canvas-context stub that records fillRect / fillText in draw order. */
+/** A canvas-context stub that records fillRect in draw order; layoutText order is
+ *  recorded on the shared counter by the ./font mock above. */
 function makeCtx() {
   const fills: FillRec[] = []
-  const texts: TextRec[] = []
   const segments: number[][] = []
   let pen: [number, number] = [0, 0]
-  let order = 0
+  font.order.n = 0
+  font.textOrders.length = 0
   const rec = {
     fillStyle: '' as string,
     strokeStyle: '' as string,
@@ -47,6 +75,7 @@ function makeCtx() {
     globalAlpha: 1,
     textAlign: '' as CanvasTextAlign,
     font: '' as string,
+    letterSpacing: '' as string,
     save() {},
     restore() {},
     beginPath() {},
@@ -62,14 +91,15 @@ function makeCtx() {
       pen = [x, y]
     },
     fillRect(x: number, y: number, w: number, h: number) {
-      fills.push({ x, y, w, h, style: rec.fillStyle, alpha: rec.globalAlpha, order: order++ })
+      fills.push({ x, y, w, h, style: rec.fillStyle, alpha: rec.globalAlpha, order: font.order.n++ })
     },
     clearRect() {},
-    fillText(_t: string, x: number, y: number) {
-      texts.push({ x, y, order: order++ })
+    fillText() {},
+    measureText() {
+      return { width: 0 }
     },
   }
-  return { ctx: rec as unknown as CanvasRenderingContext2D, fills, texts, segments }
+  return { ctx: rec as unknown as CanvasRenderingContext2D, fills, segments }
 }
 
 function fit(w: number, h: number) {
@@ -139,12 +169,12 @@ describe('render margin mask — pillarbox (wide canvas)', () => {
   })
 
   it('draws the mask BEFORE the HUD text, so the HUD is never obscured (AC-2)', () => {
-    const { ctx, fills, texts } = makeCtx()
+    const { ctx, fills } = makeCtx()
     render(ctx, playingState(), W, H, NO_INPUT)
     const mask = maskFillsOf(fills, W, H)
     expect(mask.length).toBeGreaterThan(0)
-    expect(texts.length, 'expected HUD text to be drawn').toBeGreaterThan(0)
-    const firstHudOrder = Math.min(...texts.map((t) => t.order))
+    expect(font.textOrders.length, 'expected HUD text to be laid out').toBeGreaterThan(0)
+    const firstHudOrder = Math.min(...font.textOrders)
     for (const f of mask) {
       expect(f.order, 'a mask fill was drawn on top of the HUD').toBeLessThan(firstHudOrder)
     }

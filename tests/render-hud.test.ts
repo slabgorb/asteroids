@@ -6,22 +6,47 @@
 //
 // Like tests/render.test.ts (A-5), the testable seam is the sequence of draw
 // calls, not pixels: vitest runs in `node`, so we drive render() with a recording
-// stub. Unlike A-5's explicit makeCtx, this one is a Proxy that records
-// fillText/strokeText strings and counts lineTo segments while no-oping every
-// other context member — HUD text lands via the canvas text API (the vendored
-// vector font sets ctx.font; star-wars' render.ts precedent), and a Proxy keeps
-// this suite from breaking every time Dev touches an unrelated ctx call.
+// stub. SH2-4 UPDATE: the HUD no longer draws text through the canvas text API —
+// every glyph is stroked from @arcade/shared/font layoutText geometry — so the
+// string a run draws is now observed at the layoutText seam (the local ./font
+// module is mocked to record it), while the lives-row test still counts stroked
+// lineTo segments on a Proxy ctx.
 //
 // These tests pin MECHANISMS (which strings reach the screen; that lives change
 // the drawn geometry), never layout/coordinates — position, size, and glow are
 // AC-5-style visual criteria, eyeballed at http://localhost:5275/asteroids/
 // per the epic's render guardrail.
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { render } from '../src/shell/render'
 import { initialState, type GameState, type GameOverPhase } from '../src/core/state'
 import { NO_INPUT } from '../src/core/input'
 import { formatScore } from '../src/core/score'
+
+// Record the strings + opts handed to layoutText. The mock returns trivial-but-
+// valid geometry so render can stroke it without NaN and without the shared
+// package needing to resolve.
+const font = vi.hoisted(() => {
+  const calls: { text: string; opts: { letterSpacing?: number } | undefined }[] = []
+  return {
+    calls,
+    layoutText(text: string, opts?: { letterSpacing?: number }) {
+      calls.push({ text, opts })
+      const n = [...text].length
+      const sp = opts?.letterSpacing ?? 0
+      return { strokes: [{ points: [{ x: 0, y: 0 }, { x: 16, y: 0 }] }], width: 16 * n + sp * n }
+    },
+  }
+})
+
+vi.mock('../src/shell/font', () => ({
+  layoutText: font.layoutText,
+  CELL_W: 16,
+  CELL_H: 24,
+  hasGlyph: () => true,
+  charGlyph: () => ({ strokes: [], advance: 24 }),
+  GLYPH_CHARS: ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-_,/',
+}))
 
 const W = 800
 const H = 600
@@ -73,9 +98,10 @@ const playing = (over: Partial<GameState> = {}): GameState => ({
 })
 
 const drawnTexts = (state: GameState): string[] => {
-  const { ctx, texts } = makeTextCtx()
+  font.calls.length = 0
+  const { ctx } = makeTextCtx()
   render(ctx, state, W, H, NO_INPUT)
-  return texts
+  return font.calls.map((c) => c.text)
 }
 
 // ---- HUD: score + high score --------------------------------------------------
