@@ -76,8 +76,9 @@ function makeCtx() {
       clears.push({ x, y, w, h })
     },
     arc() {},
-    // A-16: the HUD draws text; this suite asserts vector geometry only, so the
-    // text call is a recorded-nowhere no-op (tests/render-hud.test.ts owns text).
+    // SH2-4: HUD text is stroked vector geometry now (render no longer calls
+    // fillText); this stub stays a harmless no-op. Tests that count ship/debris
+    // strokes isolate the HUD via delta / sub-1.0 fade alpha.
     fillText() {},
   }
   return { ctx: rec as unknown as CanvasRenderingContext2D, segments, fills, clears, strokeAlphas }
@@ -146,8 +147,19 @@ describe('render — ship silhouette (AC-2)', () => {
     expect(upCtx.segments.length).toBeGreaterThan(0)
     expect(downCtx.segments.length).toBeGreaterThan(0)
 
-    const up = endpointYs(upCtx.segments)
-    const down = endpointYs(downCtx.segments)
+    // SH2-4: the HUD now strokes vector glyphs at a fixed top-of-screen position,
+    // identical in both renders. Isolate the SHIP by taking each frame's segments
+    // the other frame lacks — the HUD (and any identical seeded geometry) cancels,
+    // leaving only the orientation-dependent silhouette.
+    const downKeys = new Set(downCtx.segments.map(segKey))
+    const upKeys = new Set(upCtx.segments.map(segKey))
+    const shipUp = upCtx.segments.filter((s) => !downKeys.has(segKey(s)))
+    const shipDown = downCtx.segments.filter((s) => !upKeys.has(segKey(s)))
+    expect(shipUp.length).toBeGreaterThan(0)
+    expect(shipDown.length).toBeGreaterThan(0)
+
+    const up = endpointYs(shipUp)
+    const down = endpointYs(shipDown)
     // Nose-up reaches higher (smaller min y) than nose-down.
     expect(Math.min(...up)).toBeLessThan(Math.min(...down))
     // Nose-down reaches lower (larger max y) than nose-up.
@@ -235,26 +247,35 @@ describe('render — ship breakup debris (A2-5)', () => {
   })
 
   it('draws each debris segment as a stroked line', () => {
-    const { ctx, segments } = makeCtx()
-    render(ctx, debrisState([segAt(1), segAt(1)]), W, H, NO_INPUT)
-    expect(segments.length).toBe(2) // one moveTo->lineTo per segment
+    // SH2-4: the HUD now strokes vector glyphs (a constant count — score 000000),
+    // so difference against the debris-free frame; the HUD cancels, leaving the
+    // debris lines. `initialState` has empty rocks/bullets/saucer and the ship is
+    // destroyed, so debris is the only OTHER stroked entity.
+    const two = makeCtx()
+    render(two.ctx, debrisState([segAt(1), segAt(1)]), W, H, NO_INPUT)
+    const none = makeCtx()
+    render(none.ctx, debrisState([]), W, H, NO_INPUT)
+    expect(two.segments.length - none.segments.length).toBe(2) // one moveTo->lineTo per segment
   })
 
   it('draws nothing when there is no debris', () => {
-    const { ctx, segments } = makeCtx()
+    // Each debris segment strokes at its fade alpha (< 1); with no debris that
+    // alpha is never applied, so nothing commits below full alpha. A phantom
+    // debris line (drawn at a fade alpha) would surface here.
+    const { ctx, strokeAlphas } = makeCtx()
     render(ctx, debrisState([]), W, H, NO_INPUT)
-    expect(segments.length).toBe(0)
+    expect(strokeAlphas.filter((a) => a < 1)).toHaveLength(0)
   })
 
   it('fades a segment out — less remaining life strokes at lower alpha', () => {
+    // The debris segment strokes at its fade alpha (life/lifetime) and is the
+    // dimmest stroke in the frame, so the min recorded alpha tracks it — more life
+    // must read brighter than nearly-expired.
     const bright = makeCtx()
-    render(bright.ctx, debrisState([segAt(1.5)]), W, H, NO_INPUT) // full life
+    render(bright.ctx, debrisState([segAt(1)]), W, H, NO_INPUT) // more life
     const dim = makeCtx()
     render(dim.ctx, debrisState([segAt(0.1)]), W, H, NO_INPUT) // nearly expired
-
-    expect(bright.strokeAlphas).toHaveLength(1)
-    expect(dim.strokeAlphas).toHaveLength(1)
-    expect(dim.strokeAlphas[0]).toBeLessThan(bright.strokeAlphas[0])
+    expect(Math.min(...dim.strokeAlphas)).toBeLessThan(Math.min(...bright.strokeAlphas))
   })
 })
 
@@ -288,27 +309,31 @@ describe('render — saucer breakup debris (A-21)', () => {
   })
 
   it('draws each saucer-debris segment as a stroked line', () => {
-    const { ctx, segments } = makeCtx()
-    render(ctx, saucerDebrisState([segAt(1), segAt(1)]), W, H, NO_INPUT)
-    expect(segments.length).toBe(2) // one moveTo->lineTo per segment
+    // SH2-4: difference against the debris-free frame so the HUD's vector glyphs
+    // (constant — score 000000) cancel, leaving the saucer-debris lines.
+    const two = makeCtx()
+    render(two.ctx, saucerDebrisState([segAt(1), segAt(1)]), W, H, NO_INPUT)
+    const none = makeCtx()
+    render(none.ctx, saucerDebrisState([]), W, H, NO_INPUT)
+    expect(two.segments.length - none.segments.length).toBe(2) // one moveTo->lineTo per segment
   })
 
   it('draws nothing when there is no saucer debris', () => {
-    const { ctx, segments } = makeCtx()
+    // With no saucer debris the fade alpha is never applied, so nothing commits
+    // below full alpha; a phantom debris line would surface here.
+    const { ctx, strokeAlphas } = makeCtx()
     render(ctx, saucerDebrisState([]), W, H, NO_INPUT)
-    expect(segments.length).toBe(0)
+    expect(strokeAlphas.filter((a) => a < 1)).toHaveLength(0)
   })
 
   it('fades a segment out — less remaining life strokes at lower alpha', () => {
-    // Alpha is monotonic in remaining life (life/lifetime), so more life must
-    // stroke brighter regardless of the exact SAUCER_DEBRIS_LIFETIME_S value.
+    // Alpha is monotonic in remaining life (life/lifetime); the debris is the
+    // dimmest stroke in the frame, so the min recorded alpha tracks it regardless
+    // of the exact SAUCER_DEBRIS_LIFETIME_S value.
     const bright = makeCtx()
     render(bright.ctx, saucerDebrisState([segAt(1)]), W, H, NO_INPUT)
     const dim = makeCtx()
     render(dim.ctx, saucerDebrisState([segAt(0.1)]), W, H, NO_INPUT)
-
-    expect(bright.strokeAlphas).toHaveLength(1)
-    expect(dim.strokeAlphas).toHaveLength(1)
-    expect(dim.strokeAlphas[0]).toBeLessThan(bright.strokeAlphas[0])
+    expect(Math.min(...dim.strokeAlphas)).toBeLessThan(Math.min(...bright.strokeAlphas))
   })
 })

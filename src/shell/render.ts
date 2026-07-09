@@ -37,6 +37,7 @@ import { SHRAPNEL_LIFETIME_S } from '../core/shrapnel'
 import { formatScore } from '../core/score'
 import type { Input } from '../core/input'
 import { marginRects, fitScale } from './margin'
+import { layoutText, CELL_H } from './font'
 
 const SHIP_COLOR = '#ffffff' // 1979 Asteroids is white-phosphor monochrome
 const FLAME_COLOR = '#ffb454' // warm thrust flame (A-19 recalibrates palette)
@@ -49,20 +50,22 @@ const LINE_WIDTH = 2
 // and stays crisp. Opacity is a feel value, calibrated in the dev server.
 const MARGIN_MASK_COLOR = 'rgba(255, 255, 255, 0.06)'
 
-// HUD / overlay type (A-16). Vector Battle is the vendored arcade face
-// (shell/font.ts); Orbitron/monospace is the CSS fallback when it fails to load.
-// The face is CAPS-ONLY — every string below renders uppercase.
-const HUD_FONT = "700 22px 'Vector Battle', 'Orbitron', monospace"
-const SMALL_FONT = "700 16px 'Vector Battle', 'Orbitron', monospace"
-const BANNER_FONT = "900 48px 'Vector Battle', 'Orbitron', monospace"
+// HUD / overlay type (A-16). SH2-4 retired the non-commercial vendored TTF for the
+// shared ROM stroke-vector font (@arcade/shared/font, via ./font). These
+// are cap heights in screen px — the 24-unit glyph cell (CELL_H) scales onto each.
+// The face is CAPS-ONLY; every HUD string below is already uppercase.
+const HUD_SIZE = 22
+const SMALL_SIZE = 16
+const BANNER_SIZE = 48
 
-// A2-2: inter-glyph tracking for the caps-only Vector Battle face — the thin
-// vector strokes read as cramped at the canvas default (0). Expressed as ~0.1em
-// and derived from each run's OWN px size (parsed from its font string) so every
-// size — 16px small, 22px HUD, 48px banner — gets proportional spacing. Mirrors
-// star-wars' glowText (shell/render.ts), the sibling that shares this face. A
-// feel value; eyeballed in the dev server per the epic's render guardrail.
+// A2-2: inter-glyph tracking for the caps-only vector face — the thin strokes read
+// cramped at zero. Expressed as ~0.1em; a CONSTANT tracking in glyph-cell units
+// (HUD_TRACKING_EM * CELL_H) reproduces that 0.1em screen tracking at every size,
+// because each run scales the cell by sizePx/CELL_H and layoutText's letterSpacing
+// opt is in the same cell units. A feel value; eyeballed in the dev server per the
+// epic's render guardrail.
 const HUD_TRACKING_EM = 0.1
+const GLYPH_TRACKING = HUD_TRACKING_EM * CELL_H
 
 // Attract overlay cadence: the ROM's pre-game routine cycles the PUSH START
 // prompt with the high-score list; exact page timings are A-17's quarry, so
@@ -322,26 +325,38 @@ function drawSaucer(ctx: CanvasRenderingContext2D, saucer: Saucer, view: View): 
   }
 }
 
-/** One glowing HUD text run at a screen-space position. */
+/** One glowing HUD text run, stroked from the shared ROM vector font. `sizePx` is
+ *  the cap height (the CELL_H glyph cell scales onto it); `align` anchors the text
+ *  box horizontally on x; y is the baseline. A2-2 tracking rides layoutText's
+ *  spacing opt (glyph-cell units), not the canvas text API. Single-pass glow
+ *  matches asteroids' strokePoly — the shared glow primitive lands later (SH2-8). */
 function drawText(
   ctx: CanvasRenderingContext2D,
   text: string,
   x: number,
   y: number,
-  font: string,
-  align: CanvasTextAlign,
+  sizePx: number,
+  align: 'left' | 'center' | 'right',
 ): void {
-  ctx.font = font
-  // ~0.1em tracking off this run's px size (see HUD_TRACKING_EM). Every on-screen
-  // text run flows through here, so setting it per call fully controls tracking;
-  // it never bleeds to the vector strokes (letterSpacing affects text only).
-  const px = /(\d+(?:\.\d+)?)px/.exec(font)
-  ctx.letterSpacing = `${((px ? parseFloat(px[1]) : 16) * HUD_TRACKING_EM).toFixed(2)}px`
-  ctx.textAlign = align
-  ctx.fillStyle = SHIP_COLOR
+  const scale = sizePx / CELL_H
+  const { strokes, width } = layoutText(text, { letterSpacing: GLYPH_TRACKING })
+  const w = width * scale
+  const ox = align === 'center' ? x - w / 2 : align === 'right' ? x - w : x
+  ctx.strokeStyle = SHIP_COLOR
   ctx.shadowColor = SHIP_COLOR
   ctx.shadowBlur = GLOW_BLUR
-  ctx.fillText(text, x, y)
+  ctx.lineWidth = LINE_WIDTH
+  ctx.beginPath()
+  for (const s of strokes) {
+    // Glyph space is y-up with the baseline at 0; map to screen (y grows down).
+    s.points.forEach((p, i) => {
+      const sx = ox + p.x * scale
+      const sy = y - p.y * scale
+      if (i === 0) ctx.moveTo(sx, sy)
+      else ctx.lineTo(sx, sy)
+    })
+  }
+  ctx.stroke()
 }
 
 /** One mini nose-up ship glyph, screen px, for the reserve-lives row. */
@@ -365,9 +380,9 @@ function drawLifeIcon(ctx: CanvasRenderingContext2D, cx: number, cy: number): vo
  *  and a mini-ship per reserve life. */
 function drawHud(ctx: CanvasRenderingContext2D, state: GameState, w: number): void {
   const scoreX = w * 0.25
-  drawText(ctx, formatScore(state.score), scoreX, 44, HUD_FONT, 'right')
+  drawText(ctx, formatScore(state.score), scoreX, 44, HUD_SIZE, 'right')
   const highest = Math.max(state.highScoreTable[0]?.score ?? 0, state.score)
-  drawText(ctx, formatScore(highest), w / 2, 32, SMALL_FONT, 'center')
+  drawText(ctx, formatScore(highest), w / 2, 32, SMALL_SIZE, 'center')
   for (let i = 0; i < state.lives; i++) {
     drawLifeIcon(ctx, scoreX - LIFE_ICON_W / 2 - i * (LIFE_ICON_W + LIFE_ICON_GAP), 64)
   }
@@ -378,14 +393,14 @@ function drawHud(ctx: CanvasRenderingContext2D, state: GameState, w: number): vo
 function drawAttractOverlay(ctx: CanvasRenderingContext2D, state: GameState, w: number, h: number): void {
   const page = Math.floor(state.tick / ATTRACT_CYCLE_TICKS) % 2
   if (page === 0 || state.highScoreTable.length === 0) {
-    drawText(ctx, 'ASTEROIDS', w / 2, h * 0.4, BANNER_FONT, 'center')
-    drawText(ctx, 'PUSH START', w / 2, h * 0.55, HUD_FONT, 'center')
+    drawText(ctx, 'ASTEROIDS', w / 2, h * 0.4, BANNER_SIZE, 'center')
+    drawText(ctx, 'PUSH START', w / 2, h * 0.55, HUD_SIZE, 'center')
     return
   }
-  drawText(ctx, 'HIGH SCORES', w / 2, h * 0.3, HUD_FONT, 'center')
+  drawText(ctx, 'HIGH SCORES', w / 2, h * 0.3, HUD_SIZE, 'center')
   state.highScoreTable.forEach((entry, i) => {
     const row = `${String(i + 1).padStart(2, ' ')}  ${entry.name}  ${formatScore(entry.score)}`
-    drawText(ctx, row, w / 2, h * 0.3 + (i + 1) * 26, SMALL_FONT, 'center')
+    drawText(ctx, row, w / 2, h * 0.3 + (i + 1) * 26, SMALL_SIZE, 'center')
   })
 }
 
@@ -397,13 +412,13 @@ function drawGameOverOverlay(
   w: number,
   h: number,
 ): void {
-  drawText(ctx, 'GAME OVER', w / 2, h * 0.4, BANNER_FONT, 'center')
+  drawText(ctx, 'GAME OVER', w / 2, h * 0.4, BANNER_SIZE, 'center')
   const over = state.gameOver
   if (over === null || !over.qualifies) return
-  drawText(ctx, 'YOUR SCORE IS ONE OF THE TEN BEST', w / 2, h * 0.52, SMALL_FONT, 'center')
-  drawText(ctx, 'PLEASE ENTER YOUR INITIALS', w / 2, h * 0.57, SMALL_FONT, 'center')
+  drawText(ctx, 'YOUR SCORE IS ONE OF THE TEN BEST', w / 2, h * 0.52, SMALL_SIZE, 'center')
+  drawText(ctx, 'PLEASE ENTER YOUR INITIALS', w / 2, h * 0.57, SMALL_SIZE, 'center')
   const echo = `${over.initials}${'_'.repeat(3 - over.initials.length)}`
-  drawText(ctx, echo, w / 2, h * 0.65, BANNER_FONT, 'center')
+  drawText(ctx, echo, w / 2, h * 0.65, BANNER_SIZE, 'center')
 }
 
 /** Overlay the non-playable margin (letterbox/pillarbox bars) with a faint light
