@@ -17,7 +17,6 @@ import { createTuning, loadTuning } from './shell/tuning'
 import { mountTuningPanel } from './shell/tuning-panel'
 import { render } from './shell/render'
 import { makeHighScoreStorage, makeHighScoreRowGuard } from '@arcade/shared/highscore'
-import { loadVectorFont } from './shell/font'
 import { createAudioEngine } from './shell/audio'
 import { playEventSounds } from './shell/audio-dispatch'
 
@@ -60,8 +59,6 @@ window.addEventListener('keydown', unlockAudio)
 // the sim now owns the attract→start→gameover loop, and the persisted board is
 // threaded into core state where the qualify/insert logic reads it.
 let state: GameState = { ...initialState(), highScoreTable: highScoreStorage.load() }
-// Best-effort: the HUD falls back to the CSS stack until/unless the face loads.
-void loadVectorFont()
 // Initials entry (A-16): typed letters are edge events, not held state, so they
 // bypass the per-frame Input sample and feed the core's pure event function.
 // enterInitial is inert outside a qualifying game-over, so no mode guard here.

@@ -208,7 +208,12 @@ describe('SH2-4 — render.ts draws text via @arcade/shared/font layoutText', ()
     const src = read(RENDER)
     expect(/\bfillText\b/.test(src), 'render.ts still calls fillText').toBe(false)
     expect(/\bctx\.font\b/.test(src), 'render.ts still sets ctx.font').toBe(false)
-    expect(/\bletterSpacing\b/.test(src), 'render.ts still sets ctx.letterSpacing').toBe(false)
+    // NOTE (Dev/SH2-4): narrowed from `/\bletterSpacing\b/` to the ctx property.
+    // AC-3 mandates the layoutText `{ letterSpacing }` OPT, so the bare word must
+    // appear in render.ts — the original regex contradicted AC-3 and font-layout.
+    // The runtime `letterSpacingSets` assertions (this file + font-layout.test.ts)
+    // are the real guard that ctx.letterSpacing is never set.
+    expect(/ctx\.letterSpacing/.test(src), 'render.ts still sets ctx.letterSpacing').toBe(false)
   })
 
   it('imports and calls layoutText', () => {
