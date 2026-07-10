@@ -10,7 +10,8 @@
 // hyperspace, ORed with the existing keyboard state. Mousedown/contextmenu
 // bind to `target` (the canvas); mouseup/blur bind to `window` so a release
 // off-canvas or a lost-focus alt-tab still clears a held button — mirrors
-// tempest's `createInputController(target)` pattern.
+// tempest's `createInputController(target)` pattern. The left button also
+// doubles as start (like Space), so a click begins a game from attract.
 
 import type { Input } from '../core/input'
 import { DEFAULT_TUNING, type RotationTuning } from './tuning'
@@ -128,7 +129,9 @@ export function createInputController(
         thrust: any(KEYS.thrust),
         fire: any(KEYS.fire) || mouseFireHeld,
         hyperspace: any(KEYS.hyperspace) || mouseHyperspaceHeld,
-        start: any(KEYS.start),
+        // The left mouse button doubles as start, exactly as Space does: fire
+        // during play, start from attract/gameover — the sim gates each by mode.
+        start: any(KEYS.start) || mouseFireHeld,
       }
     },
   }
