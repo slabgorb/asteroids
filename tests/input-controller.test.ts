@@ -109,6 +109,33 @@ describe('createInputController — left mouse button fires (AC-1)', () => {
   })
 })
 
+describe('createInputController — left mouse button also starts a game (out-of-band)', () => {
+  // The left button already feeds `fire`; it now doubles as `start` too — the
+  // exact mirror of how Space doubles as fire AND start. Safe because the sim
+  // gates each by mode (start is inert during play, fire in attract/gameover),
+  // so a single click begins a game from attract without any mode plumbing here.
+  it('sets start while the left button is held on the target', () => {
+    const ctrl = build()
+    target.emit('mousedown', { button: 0 })
+    expect(ctrl.sample().start).toBe(true)
+  })
+
+  it('clears start once the left button is released', () => {
+    const ctrl = build()
+    target.emit('mousedown', { button: 0 })
+    expect(ctrl.sample().start).toBe(true)
+
+    windowBus.emit('mouseup', { button: 0 })
+    expect(ctrl.sample().start).toBe(false)
+  })
+
+  it('the right button does not start a game — only the left click does', () => {
+    const ctrl = build()
+    target.emit('mousedown', { button: 2 })
+    expect(ctrl.sample().start, 'right button is hyperspace, not start').toBe(false)
+  })
+})
+
 describe('createInputController — right mouse button triggers hyperspace (AC-2)', () => {
   it('sets hyperspace while the right button is held on the target', () => {
     const ctrl = build()
