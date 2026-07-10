@@ -2,6 +2,8 @@
 
 A faithful, browser-based clone of Atari's 1979 vector arcade game *Asteroids*.
 
+**▶ Play it live: [asteroids.slabgorb.com](https://asteroids.slabgorb.com)**
+
 You pilot a ship adrift in a toroidal field of drifting rocks — rotate, thrust,
 and fire to break large rocks into smaller ones before they (or a roaming
 saucer) get you. Glowing vector lines on black, rendered with HTML5 Canvas 2D —
@@ -124,3 +126,11 @@ refactor. The disassembly quarry itself is kept locally under `reference/`
 Private project, for personal/educational use. *Asteroids* and *Atari* are
 trademarks of their respective owners; this is an educational clone built to
 learn how the original worked.
+
+## Releasing
+
+This repo ships from the [arcade orchestrator](https://github.com/slabgorb/arcade):
+`just release asteroids` gates on tests + build, merges `develop` → `main`, tags
+`vX.Y.Z`, and pushes. Every push to `main` auto-deploys to Cloudflare R2 via
+GitHub Actions (`.github/workflows/deploy.yml`) — **`main` is production; never
+push it by hand.** A red CI run deploys nothing.
