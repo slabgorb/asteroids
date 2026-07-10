@@ -24,6 +24,7 @@ import { updateWaveDirector } from './waves'
 import { updateSpawnDirector, stepSaucer, SAUCER_HITBOX, SAUCER_ROCK_COLLISION_ENABLED } from './saucer'
 import { applyScore, addScore, SAUCER_SCORE } from './score'
 import { insertHighScore } from '@arcade/shared/highscore'
+import { stepNameEntry } from '@arcade/shared/name-entry'
 import { handleShipDeath, tryRespawnShip } from './lives'
 import { triggerHyperspace } from './hyperspace'
 import { wrappedDelta, type Bounds } from './bounds'
@@ -84,6 +85,11 @@ const WORLD_BOUNDS: Bounds = { width: WORLD_W, height: WORLD_H }
 // Re-exported for compatibility: the constant moved to state.ts (A-15) so
 // core/lives.ts can initialise the gameover phase without an import cycle.
 export { GAME_OVER_DISPLAY_S }
+
+/** Initials the entry screen collects — the 3-char arcade convention. One of
+ * asteroids' per-cabinet NUMBERS; the entry VERB itself is the cabinet-wide
+ * shared reducer (SH2-13). */
+const MAX_INITIALS = 3
 
 /** Wrap-aware overlap: true when `a` and `b` are within `extent` on BOTH axes
  * across the toroidal field (an AABB of half-extent `extent`, measured by the
@@ -210,7 +216,7 @@ function stepGameOver(
   if (over === null) return base
 
   if (over.qualifies && !over.confirmed) {
-    if (startPressed && over.initials.length === 3) {
+    if (startPressed && over.initials.length === MAX_INITIALS) {
       // The core builds the entry WITHOUT a date — the pure core never reads
       // the wall clock (core-boundary guard); `date?` is optional by design.
       return {
@@ -232,18 +238,20 @@ function stepGameOver(
   return { ...base, gameOver: { ...over, displayTimer } }
 }
 
-/** Type one initials character on the qualifying game-over screen. A PURE core
- * event function the shell calls per keydown — initials are edge events, not
+/** One initials keydown on the qualifying game-over screen. A PURE core event
+ * function the shell calls per keydown — initials are edge events, not
  * per-frame held state, so they do not ride on Input (which stays the six
- * plain booleans). Uppercases, accepts A–Z only, caps at 3; inert in every
- * other mode/phase. */
-export function enterInitial(state: GameState, char: string): GameState {
+ * plain booleans). The buffer arithmetic is the cabinet-wide shared verb
+ * (SH2-13, @arcade/shared/name-entry): A–Z appends uppercased up to
+ * MAX_INITIALS, Backspace deletes (never past empty), other keys are inert.
+ * Inert in every other mode/phase; a no-op returns the same state. */
+export function enterInitial(state: GameState, key: string): GameState {
   if (state.mode !== 'gameover') return state
   const over = state.gameOver
   if (over === null || !over.qualifies || over.confirmed) return state
-  if (over.initials.length >= 3) return state
-  if (!/^[a-zA-Z]$/.test(char)) return state
-  return { ...state, gameOver: { ...over, initials: over.initials + char.toUpperCase() } }
+  const initials = stepNameEntry(over.initials, key, MAX_INITIALS)
+  if (initials === over.initials) return state
+  return { ...state, gameOver: { ...over, initials } }
 }
 
 export function stepGame(
