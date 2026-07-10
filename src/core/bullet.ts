@@ -6,6 +6,13 @@
 // no DOM, no wall-clock or entropy globals; time enters only as `dt`, and
 // firing consumes no randomness.
 //
+// A2 ad-hoc (2026-07): the shot direction is derived by HALVING the ship's
+// per-axis thrust component (ROM `cmp #$80 : ror A`), then adding momentum and
+// clamping the sum to ±111 — see muzzleAxis / clampVel below. An earlier reading
+// transcribed the halve as a 3/2 MULTIPLY, which drove near-cardinal axes past
+// the ±111 clamp and deflected shots up to ~11° off the ship's nose; halving
+// keeps the muzzle (±63) under the clamp so shots fly true along the heading.
+//
 // ROM-tuned against the rev-4 disassembly at
 // https://6502disassembly.com/va-asteroids/Asteroids.html (the reference/ quarry
 // is absent from this checkout — see session Delivery Findings — so the values
@@ -33,28 +40,40 @@ export const BULLET_LIFETIME_FRAMES = 18
  * timer. The ROM integrates position every frame but only DECREMENTS the per-shot
  * timer on every 4th frame (FrameTimerLo `and #$03`, L738F) — so a shot seeded to
  * BULLET_LIFETIME_FRAMES actually flies BULLET_LIFETIME_FRAMES x 4 = 72 frames
- * (~72 x 111 = 7992 lo-units, nearly the full 8192-wide screen). The port aged
- * `life` every frame, dying at 18 frames (~a quarter screen): 4x too short (A2-9).
- * Shared and owner-agnostic — player and saucer shots age on the same cadence. */
+ * (~72 x 63 = 4536 lo-units, ~55% of the 8192-wide screen at the authentic muzzle
+ * speed — see muzzleAxis; a deliberately limited-range shot). The port aged
+ * `life` every frame, dying at 18 frames (~an eighth of the screen): 4x too short
+ * (A2-9). Shared and owner-agnostic — player and saucer shots age on the same cadence. */
 export const SHOT_TIMER_PERIOD_FRAMES = 4
 
-/** Per-axis muzzle-speed clamp: the shot's heading velocity is capped at ±111
- * lo-units/frame (shot-velocity clamp near $6d1a/$6d22) BEFORE the ship's
- * velocity is added. This is above the ship's ±16383/256 per-axis cap, so a
- * shot always outruns the ship that fired it. */
+/** Per-axis velocity clamp for a shot: the ROM caps each axis of the shot's
+ * TOTAL velocity — muzzle PLUS inherited ship momentum — at ±111 lo-units/frame
+ * ($6d19 `cmp #112`/`lda #111`; $6d21 `cmp #145`/`lda #$91` = -111). It bounds
+ * the SUM, it does not reshape the muzzle: the halved muzzle alone is only ±63
+ * (see muzzleAxis), well under the cap, so a rest-fired shot flies true along the
+ * heading and the clamp bites only once fast ship momentum is added. That
+ * headroom (111 > the ship's own ±16383/256 ≈ ±63.99 cap) is what lets a shot
+ * outrun the ship that fired it. */
 export const BULLET_SPEED = 111
 
-function clampMuzzle(v: number): number {
+function clampVel(v: number): number {
   return Math.min(BULLET_SPEED, Math.max(-BULLET_SPEED, v))
 }
 
-/** A shot's per-axis muzzle velocity: the thrust-direction sine amplitude taken
- * at 3/2 (the ROM adds the heading value plus half of it again, BulletSlotFound
- * $6d0c–$6d2a) and clamped to ±BULLET_SPEED. At a cardinal heading this lands at
- * the clamp on one axis and zero on the other, so cardinal muzzle speed is a
- * fixed 111 in every direction. */
+/** A shot's per-axis MUZZLE velocity: the ROM HALVES the ship's per-axis thrust
+ * component with a signed shift — `cmp #$80 : ror A` ($6d0e–$6d10 for X,
+ * $6d31–$6d33 for Y), the canonical 6502 idiom for an arithmetic-shift-right
+ * (signed divide-by-2). For the integer thrust-table value that is exactly
+ * `h >> 1` (which floors toward -∞, matching `ror`, so the negative cardinals
+ * come out one lo-unit larger in magnitude than the positive ones). Because both
+ * axes are halved by the SAME factor the muzzle vector preserves the heading's
+ * direction — unlike a per-axis clamp, which would deflect it toward a diagonal.
+ * Cardinal muzzle speed is therefore sinLookup(64) >> 1 = 63, comfortably under
+ * the ±111 total-velocity clamp. (The pre-fix port used `h + h/2` — a 3/2
+ * MULTIPLY — which drove near-cardinal axes past the clamp and deflected shots up
+ * to ~11° off the nose: A2 ad-hoc fidelity fix.) */
 function muzzleAxis(headingVal: number): number {
-  return clampMuzzle(headingVal + headingVal / 2)
+  return headingVal >> 1
 }
 
 /** Advance every live bullet one step: integrate position by velocity, decrement
@@ -122,8 +141,10 @@ export function stepBullets(
     next.push({
       pos: { x: ship.pos.x, y: ship.pos.y },
       vel: {
-        x: muzzleAxis(sinLookup(ship.dir + 64)) + ship.vel.x,
-        y: muzzleAxis(sinLookup(ship.dir)) + ship.vel.y,
+        // ROM order ($6d0e–$6d27 / $6d31–$6d44): halve the muzzle, ADD the ship's
+        // momentum, THEN clamp the sum to ±111 — not clamp-then-add.
+        x: clampVel(muzzleAxis(sinLookup(ship.dir + 64)) + ship.vel.x),
+        y: clampVel(muzzleAxis(sinLookup(ship.dir)) + ship.vel.y),
       },
       life: BULLET_LIFETIME_FRAMES,
       owner: 'player',
