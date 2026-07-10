@@ -62,8 +62,9 @@ let state: GameState = { ...initialState(), highScoreTable: highScoreStorage.loa
 // Initials entry (A-16): typed letters are edge events, not held state, so they
 // bypass the per-frame Input sample and feed the core's pure event function.
 // enterInitial is inert outside a qualifying game-over, so no mode guard here.
+// Backspace rides the same path (SH2-13): the shared reducer deletes on it.
 window.addEventListener('keydown', (e: KeyboardEvent) => {
-  if (/^[a-zA-Z]$/.test(e.key)) state = enterInitial(state, e.key)
+  if (/^[a-zA-Z]$/.test(e.key) || e.key === 'Backspace') state = enterInitial(state, e.key)
 })
 // The renderer needs the frame's input to draw the thrust flame — the pure core
 // carries no "thrusting" flag (GameState.ship is pos/vel/dir only). Sample once
