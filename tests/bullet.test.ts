@@ -19,13 +19,16 @@
 //   - Max shots: 4 player-shot slots (ship-bullet loop around $6cee/$6cf2,
 //     `lda #$03` / `sta $0e` — indices 0..3).
 //   - Muzzle velocity: computed per-axis from the ship heading via the same
-//     quarter-sine fold as thrust (sinLookup) and ADDED to the ship's current
-//     velocity ($6d11: `adc ShipXSpeed`) — momentum is inherited, not
-//     discarded. Per-axis, the shot velocity is clamped to ±111 lo-units/frame
-//     (A-3 quarry note) — well above the ship's ±63.99 cap, so a shot outruns
-//     the ship that fired it. Because the clamp/fold is per-axis (like thrust),
-//     muzzle speed is isotropic across the four CARDINAL headings but NOT at
-//     diagonals — so these tests exercise cardinals only for magnitude.
+//     quarter-sine fold as thrust (sinLookup), then HALVED with a signed shift
+//     (ROM `cmp #$80 : ror A`, $6d0e-$6d10 / $6d31-$6d33 = arithmetic /2), ADDED
+//     to the ship's current velocity ($6d14: `adc ShipXSpeed`), and only THEN is
+//     the SUM clamped to ±111 lo-units/frame ($6d19 `lda #111`). Momentum is
+//     inherited, not discarded. Halving both axes equally preserves the heading
+//     direction, so shots fly true out the nose (A2 ad-hoc: the port had wrongly
+//     transcribed the halve as a 3/2 MULTIPLY, deflecting shots up to ~11°). The
+//     ±111 cap sits above the ship's own ±63.99 max, giving the headroom that
+//     lets a moving ship's shot outrun it. Cardinal muzzle speed is ~63 (near-
+//     isotropic, ±1 from the signed-shift floor), NOT the clamp value.
 //   - Lifetime: a per-shot countdown initialised on fire (ShpShotTimer region
 //     ~$021F) removes the shot after a fixed number of frames.
 //   - Fire debounce: a fire-button shift register (ShipBulletSR $63, shifted at
@@ -63,6 +66,7 @@ import {
   MAX_PLAYER_SHOTS,
   BULLET_LIFETIME_FRAMES,
   SHOT_TIMER_PERIOD_FRAMES,
+  BULLET_SPEED,
   stepBullets,
 } from '../src/core/bullet'
 import { SHIP_MAX_SPEED } from '../src/core/ship'
@@ -156,22 +160,55 @@ describe('muzzle velocity (AC-2)', () => {
     })
   }
 
-  it('muzzle speed is isotropic across the four cardinals (equal magnitude, no value assumed)', () => {
+  it('fires straight along the heading at OFF-cardinal angles — the shot leaves the nose, never deflected toward a diagonal (ROM signed-halve $6d10 `ror A`, not a 1.5x per-axis clamp)', () => {
+    // The ROM computes each muzzle axis by HALVING the ship's per-axis thrust
+    // component with a signed shift (`cmp #$80 : ror A`, $6d0e-$6d10 X / $6d31-
+    // $6d33 Y) BEFORE adding momentum and clamping the SUM to ±111. At rest the
+    // halved muzzle (±63) never reaches the clamp, so the shot's direction equals
+    // the ship heading. A `1.5x`-then-per-axis-clamp (the pre-fix bug) instead
+    // pushes near-cardinal axes past ±111, reshaping the vector and deflecting the
+    // shot up to ~11° toward the nearest 45° diagonal. Exercise the off-cardinal
+    // headings where that deflection is largest — the shot must fly out the nose.
+    for (const dir of [8, 16, 24, 40, 72, 200]) {
+      const theta = (dir / 256) * Math.PI * 2
+      const b = fireOnce(playing(1, { dir, vel: { x: 0, y: 0 } })).bullets[0]
+      const shotAngle = Math.atan2(b.vel.y, b.vel.x)
+      // Smallest absolute angular difference between shot heading and ship
+      // heading, in degrees. Pre-fix this reached ~11°; post-fix only the ROM
+      // sine-table quantization remains (< ~0.3°).
+      const deg = Math.abs((((shotAngle - theta) * 180) / Math.PI + 540) % 360 - 180)
+      expect(deg).toBeLessThan(1)
+    }
+  })
+
+  it('muzzle speed is near-isotropic across the four cardinals (equal to within the signed-shift ±1)', () => {
     const speeds = CARDINALS.map(([dir]) => {
       const v = fireOnce(playing(1, { dir, vel: { x: 0, y: 0 } })).bullets[0].vel
       return Math.hypot(v.x, v.y)
     })
-    // All four cardinal muzzle speeds equal one another (per-axis symmetry) —
-    // proven relative to each other, not to a hard-coded constant.
-    for (const s of speeds) expect(s).toBeCloseTo(speeds[0], 3)
+    // The four cardinal muzzle speeds match one another to within a single
+    // lo-unit: the ROM's signed halve (`ror A` = arithmetic shift right) floors
+    // toward -∞, so the negative cardinals (dir 128/192) round to 64 while the
+    // positive ones (dir 0/64) give 63. Proven relative to each other, not to a
+    // hard-coded constant.
+    for (const s of speeds) expect(Math.abs(s - speeds[0])).toBeLessThanOrEqual(1)
   })
 
-  it('a rest-fired shot outruns the ship — muzzle speed exceeds the ship max (ROM ±111 > ±63.99)', () => {
-    // Fired from a stationary ship, the shot is strictly faster than the ship
-    // could ever travel along that axis (A-3 quarry: shots clamp at ±111
-    // lo-units/frame vs the ship's ±16383/256).
-    const b = fireOnce(playing(1, { dir: 0, vel: { x: 0, y: 0 } })).bullets[0]
-    expect(b.vel.x).toBeGreaterThan(SHIP_MAX_SPEED)
+  it('clamps the shot total velocity to the ROM ±111 cap (muzzle+momentum) and so outruns the ship that fired it', () => {
+    // The ±111 clamp bounds muzzle PLUS inherited momentum, not the muzzle alone.
+    // A rest muzzle is only ±63 (sinLookup >> 1) — BELOW the ship's own ±63.99
+    // max — so a rest-fired shot does NOT exceed the ship's top speed; it merely
+    // outruns the stationary ship that fired it. The clamp's headroom is what lets
+    // a shot pull ahead: fire +x from a ship already at its own max speed and
+    // muzzle+momentum saturates the cap, so the shot pegs +111 and still outruns
+    // the ship.
+    const rest = fireOnce(playing(1, { dir: 0, vel: { x: 0, y: 0 } }))
+    expect(rest.bullets[0].vel.x).toBeGreaterThan(rest.ship.vel.x) // outruns its ship
+    expect(rest.bullets[0].vel.x).toBeLessThan(SHIP_MAX_SPEED) // but not the ship's max
+
+    const fast = fireOnce(playing(1, { dir: 0, vel: { x: SHIP_MAX_SPEED, y: 0 } }))
+    expect(fast.bullets[0].vel.x).toBeCloseTo(BULLET_SPEED, 6) // pegged at the ±111 cap
+    expect(fast.bullets[0].vel.x).toBeGreaterThan(fast.ship.vel.x) // still outruns it
   })
 
   it('flies at constant velocity — no thrust, no drag on a bullet in flight', () => {
@@ -220,7 +257,7 @@ describe('lifetime & movement (AC-4)', () => {
     // The shot's real lifetime is EFFECTIVE_LIFETIME frames (the raw timer seed
     // decremented only every 4th frame — see the A2-9 block below), not the raw
     // BULLET_LIFETIME_FRAMES counter. Fire from near the LEFT seam heading +x so
-    // the full ~7992-lo-unit flight stays inside the 8192-wide field and the shot
+    // the full ~4536-lo-unit flight stays inside the 8192-wide field and the shot
     // dies by TIMER, not by reaching the edge (shots no longer wrap). Present
     // safely before expiry...
     const spawned = fireOnce(playing(1, { pos: { x: 50, y: WORLD_H / 2 }, vel: { x: 0, y: 0 }, dir: 0 }))
@@ -364,9 +401,11 @@ describe('firing purity & determinism (AC-7)', () => {
 //     L7393: dec AstStatus,X     ; Decrement shot timer.
 //
 // Positions integrate EVERY frame (UpdateObjects, L6FD0 `adc AstXPosLo,X`), so a
-// shot actually flies 18 x 4 = 72 frames — ~72 x 111 = 7992 lo-units, nearly the
-// full 8192-wide screen. The port aged `life` once per frame, so shots died at
-// 18 frames (~1998 lo-units, a quarter screen): 4x too short.
+// shot actually flies 18 x 4 = 72 frames. At the authentic muzzle speed of ~63
+// lo-units/frame (sinLookup(64) >> 1 — corrected from the pre-A2-fix 111, see
+// bullet.ts muzzleAxis) that is ~4536 lo-units, ~55% of the 8192-wide screen: a
+// limited-range shot. The port aged `life` once per frame, so shots died at 18
+// frames (~a seventh of the screen): 4x too short.
 //
 // The fix must live in the SHARED, owner-agnostic aging path (advance() in
 // bullet.ts): the story AC requires "correct respective ranges" for BOTH player
@@ -400,10 +439,10 @@ describe('shot range: ROM timer cadence (A2-9)', () => {
 
   it('travels most of the screen width before it expires (reaches distant targets)', () => {
     // Fire +x from near the LEFT seam, at rest, and track x-travel across most of
-    // the shot's life. Pre-fix travel was ~18 x 111 = 1998 lo-units (a quarter
-    // screen); the fix must carry it across most of the playfield. Fired from the
-    // left so the ~7992-lo-unit flight stays on-field and dies by TIMER, not by
-    // reaching the edge — with no wrap there is no seam to unwrap.
+    // the shot's life. Pre-cadence-fix travel was only 18 frames (~a seventh of
+    // the screen); the fix must carry it across about half the playfield. Fired
+    // from the left so the ~4536-lo-unit flight stays on-field and dies by TIMER,
+    // not by reaching the edge — with no wrap there is no seam to unwrap.
     const ship = { pos: { x: 50, y: WORLD_H / 2 }, vel: { x: 0, y: 0 }, dir: 0 }
     let s = fireOnce(playing(1, ship))
     const v = s.bullets[0].vel.x
@@ -422,8 +461,12 @@ describe('shot range: ROM timer cadence (A2-9)', () => {
     // Constant-velocity flight for the full window (no drag on a shot)...
     expect(travel).toBeGreaterThan((FRAMES - 1) * v)
     expect(travel).toBeLessThan((FRAMES + 1) * v)
-    // ...covering most of the screen — not the pre-fix quarter.
-    expect(travel).toBeGreaterThan(0.8 * WORLD_W)
+    // ...covering roughly half the screen. The authentic muzzle speed is
+    // sinLookup(64) >> 1 = 63 lo-units/frame (NOT the pre-A2-fix 111 — see the
+    // muzzleAxis signed-halve note in bullet.ts), so the full 72-frame flight is
+    // ~4536 lo-units (~55% of the 8192-wide field): a limited-range shot, as in
+    // the real game — but far past the old 18-frame quarter-screen death.
+    expect(travel).toBeGreaterThan(0.45 * WORLD_W)
   })
 
   it('ages player and saucer shots alike — the cadence lives in the shared path', () => {
