@@ -18,6 +18,6 @@
     "vitest": "^4.1.9"
   },
   "dependencies": {
-    "@arcade/shared": "github:slabgorb/arcade-shared#feat/SH2-13-keyboard-highscore-entry"
+    "@arcade/shared": "github:slabgorb/arcade-shared#feat/SH2-8-glow-browser-subpath"
   }
 }

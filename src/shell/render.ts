@@ -38,6 +38,7 @@ import { formatScore } from '../core/score'
 import type { Input } from '../core/input'
 import { marginRects, fitScale } from './margin'
 import { layoutText, CELL_H } from './font'
+import { withGlow, glowPolyline } from './glow'
 
 const SHIP_COLOR = '#ffffff' // 1979 Asteroids is white-phosphor monochrome
 const FLAME_COLOR = '#ffb454' // warm thrust flame (A-19 recalibrates palette)
@@ -145,18 +146,11 @@ function strokePoly(
   color: string,
   close: boolean,
 ): void {
-  ctx.strokeStyle = color
-  ctx.shadowColor = color
-  ctx.shadowBlur = GLOW_BLUR
-  ctx.lineWidth = LINE_WIDTH
-  ctx.beginPath()
-  pts.forEach(([wx, wy], i) => {
-    const [sx, sy] = toScreen(wx, wy, view)
-    if (i === 0) ctx.moveTo(sx, sy)
-    else ctx.lineTo(sx, sy)
-  })
-  if (close) ctx.closePath()
-  ctx.stroke()
+  // World → screen up front, then hand the screen-space polyline to the shared
+  // primitive (which owns the set-draw-reset-blur envelope). Per-cabinet GLOW_BLUR
+  // / LINE_WIDTH stay local.
+  const screen = pts.map(([wx, wy]) => toScreen(wx, wy, view))
+  glowPolyline(ctx, screen, { stroke: color, width: LINE_WIDTH, blur: GLOW_BLUR }, close)
 }
 
 /** The player ship: nose forward along the heading, two swept-back wings, and a
@@ -208,16 +202,11 @@ function drawShipDebris(
     const alpha = Math.max(0, Math.min(1, seg.life / DEBRIS_LIFETIME_S))
     const [sx1, sy1] = toScreen(seg.p1.x, seg.p1.y, view)
     const [sx2, sy2] = toScreen(seg.p2.x, seg.p2.y, view)
+    // save/restore isolates the per-segment globalAlpha fade; the glow line itself
+    // goes through the shared primitive.
     ctx.save()
     ctx.globalAlpha = alpha
-    ctx.strokeStyle = SHIP_COLOR
-    ctx.shadowColor = SHIP_COLOR
-    ctx.shadowBlur = GLOW_BLUR
-    ctx.lineWidth = LINE_WIDTH
-    ctx.beginPath()
-    ctx.moveTo(sx1, sy1)
-    ctx.lineTo(sx2, sy2)
-    ctx.stroke()
+    glowPolyline(ctx, [[sx1, sy1], [sx2, sy2]], { stroke: SHIP_COLOR, width: LINE_WIDTH, blur: GLOW_BLUR })
     ctx.restore()
   }
 }
@@ -236,14 +225,7 @@ function drawSaucerDebris(
     const [sx2, sy2] = toScreen(seg.p2.x, seg.p2.y, view)
     ctx.save()
     ctx.globalAlpha = alpha
-    ctx.strokeStyle = SHIP_COLOR
-    ctx.shadowColor = SHIP_COLOR
-    ctx.shadowBlur = GLOW_BLUR
-    ctx.lineWidth = LINE_WIDTH
-    ctx.beginPath()
-    ctx.moveTo(sx1, sy1)
-    ctx.lineTo(sx2, sy2)
-    ctx.stroke()
+    glowPolyline(ctx, [[sx1, sy1], [sx2, sy2]], { stroke: SHIP_COLOR, width: LINE_WIDTH, blur: GLOW_BLUR })
     ctx.restore()
   }
 }
@@ -342,36 +324,36 @@ function drawText(
   const { strokes, width } = layoutText(text, { letterSpacing: GLYPH_TRACKING })
   const w = width * scale
   const ox = align === 'center' ? x - w / 2 : align === 'right' ? x - w : x
-  ctx.strokeStyle = SHIP_COLOR
-  ctx.shadowColor = SHIP_COLOR
-  ctx.shadowBlur = GLOW_BLUR
-  ctx.lineWidth = LINE_WIDTH
-  ctx.beginPath()
-  for (const s of strokes) {
-    // Glyph space is y-up with the baseline at 0; map to screen (y grows down).
-    s.points.forEach((p, i) => {
-      const sx = ox + p.x * scale
-      const sy = y - p.y * scale
-      if (i === 0) ctx.moveTo(sx, sy)
-      else ctx.lineTo(sx, sy)
-    })
-  }
-  ctx.stroke()
+  // The glyph run is one path of many sub-strokes; withGlow wraps the whole
+  // beginPath→stroke in the shared set-draw-reset-blur envelope.
+  withGlow(ctx, { stroke: SHIP_COLOR, width: LINE_WIDTH, blur: GLOW_BLUR }, () => {
+    ctx.beginPath()
+    for (const s of strokes) {
+      // Glyph space is y-up with the baseline at 0; map to screen (y grows down).
+      s.points.forEach((p, i) => {
+        const sx = ox + p.x * scale
+        const sy = y - p.y * scale
+        if (i === 0) ctx.moveTo(sx, sy)
+        else ctx.lineTo(sx, sy)
+      })
+    }
+    ctx.stroke()
+  })
 }
 
 /** One mini nose-up ship glyph, screen px, for the reserve-lives row. */
 function drawLifeIcon(ctx: CanvasRenderingContext2D, cx: number, cy: number): void {
-  ctx.strokeStyle = SHIP_COLOR
-  ctx.shadowColor = SHIP_COLOR
-  ctx.shadowBlur = GLOW_BLUR
-  ctx.lineWidth = LINE_WIDTH
-  ctx.beginPath()
-  ctx.moveTo(cx, cy - LIFE_ICON_H / 2) // nose
-  ctx.lineTo(cx + LIFE_ICON_W / 2, cy + LIFE_ICON_H / 2) // right wing
-  ctx.lineTo(cx, cy + LIFE_ICON_H / 4) // tail notch
-  ctx.lineTo(cx - LIFE_ICON_W / 2, cy + LIFE_ICON_H / 2) // left wing
-  ctx.closePath()
-  ctx.stroke()
+  glowPolyline(
+    ctx,
+    [
+      [cx, cy - LIFE_ICON_H / 2], // nose
+      [cx + LIFE_ICON_W / 2, cy + LIFE_ICON_H / 2], // right wing
+      [cx, cy + LIFE_ICON_H / 4], // tail notch
+      [cx - LIFE_ICON_W / 2, cy + LIFE_ICON_H / 2], // left wing
+    ],
+    { stroke: SHIP_COLOR, width: LINE_WIDTH, blur: GLOW_BLUR },
+    true,
+  )
 }
 
 /** The always-on HUD (A-16, the first story to draw score/lives at all): the
