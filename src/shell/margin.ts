@@ -12,7 +12,14 @@
 // so the mask and the drawn world derive from ONE scale and can never drift (the
 // same parallel-copy hazard core/bounds.ts was created to eliminate).
 
+import { letterbox } from '@arcade/shared/view'
 import { WORLD_W, WORLD_H } from '../core/state'
+
+// SH2-10: the centred aspect-fit is now @arcade/shared/view's pure `letterbox`
+// (folded from this module's old inline `Math.min(w/WORLD_W, h/WORLD_H)`). The 4:3
+// world aspect drives it; `fitScale`/`marginRects` below are asteroids' cabinet
+// presentation of that one shared fit (px-per-world-unit + the drawn margin bars).
+const WORLD_ASPECT = WORLD_W / WORLD_H
 
 /** A screen-space rectangle (device px), origin top-left. */
 export interface Rect {
@@ -27,10 +34,11 @@ export interface Rect {
 const MARGIN_EPS = 1e-6
 
 /** The uniform fit scale mapping the 4:3 world into a w x h canvas: the largest
- *  scale at which the whole WORLD_W x WORLD_H world fits. Shared with render()'s
- *  projection so the mask and the drawn world use one scale. */
+ *  scale at which the whole WORLD_W x WORLD_H world fits. Derived from the shared
+ *  letterbox (box.width === WORLD_W × scale), so the mask and the drawn world use
+ *  one scale. */
 export function fitScale(w: number, h: number): number {
-  return Math.min(w / WORLD_W, h / WORLD_H)
+  return letterbox(w, h, WORLD_ASPECT).width / WORLD_W
 }
 
 /** The non-playable margin as screen-space bars: whatever letterbox/pillarbox
@@ -39,9 +47,9 @@ export function fitScale(w: number, h: number): number {
  *  when taller, none when the aspect already matches. Pure — a function of
  *  (w, h) only — and returns a fresh array each call. */
 export function marginRects(w: number, h: number): Rect[] {
-  const scale = fitScale(w, h)
-  const marginX = (w - WORLD_W * scale) / 2 // side-bar width (0 when width limits the fit)
-  const marginY = (h - WORLD_H * scale) / 2 // top/bottom-bar height (0 when height limits)
+  const box = letterbox(w, h, WORLD_ASPECT)
+  const marginX = box.x // side-bar width (0 when width limits the fit)
+  const marginY = box.y // top/bottom-bar height (0 when height limits)
   const rects: Rect[] = []
   if (marginX > MARGIN_EPS) {
     rects.push({ x: 0, y: 0, w: marginX, h })
