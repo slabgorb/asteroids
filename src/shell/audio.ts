@@ -1,28 +1,32 @@
 // src/shell/audio.ts
 //
-// A-18: shell-side WebAudio SFX engine. This is IO (shell), not simulation
-// (core) — the pure core emits `GameEvent` DATA and never imports this module
-// (core-boundary guard, tests/core-boundary.test.ts).
+// A-18 / SH2-17: asteroids' SFX manifest + engine constructor. The WebAudio ENGINE
+// itself (lazy AudioContext, master gain, buffer load/decode, POKEY-style
+// voice-stealing, silent degrade) was extracted to @arcade/shared/audio in SH2-16 and
+// adopted here in SH2-17 — four cabinets shared the identical mechanism. This module
+// keeps only asteroids' NUMBERS (the name->file SOUNDS manifest, the CHANNELS voice
+// map, the R2 base, masterGain) and constructs the shared engine from them. The
+// event->sound wiring stays in audio-dispatch.ts.
+//
+// This is IO (shell), not simulation (core) — the pure core emits `GameEvent` DATA and
+// never imports this module (core-boundary guard, tests/core-boundary.test.ts).
 //
 // Plays the ACTUAL Atari 1979 Asteroids sound effects: the canonical
-// community-recorded sample set (8-bit / 11 kHz mono .wav), fetched by URL from
-// the shared arcade-assets R2 host. The samples are NOT committed to the repo
-// (see .gitignore `sfx/`) — they are recordings of Atari's copyrighted audio,
-// kept out of git and served separately, exactly like tempest's set. The real
-// cabinet generated sound from discrete analog oscillator/noise circuits — no
-// sound chip, no ROM audio to bake — so these field recordings ARE the
-// authentic reference (there is no digital source to extract). They replace the
-// earlier oscillator-synthesis guess now that the real samples are in hand.
-//
-// Every failure mode degrades silently: no WebAudio support, a blocked autoplay
-// context, a failed fetch, or an undecodable sample all leave the game running
-// without sound rather than throwing. The context is built lazily inside
-// `resume()` (browsers forbid one before a user gesture) and every method is a
-// no-op until the samples decode.
+// community-recorded sample set (8-bit / 11 kHz mono .wav), fetched by URL from the
+// shared arcade-assets R2 host. The real cabinet generated sound from discrete analog
+// oscillator/noise circuits — no sound chip, no ROM audio to bake — so these field
+// recordings ARE the authentic reference. Every failure mode still degrades silently
+// (no WebAudio, blocked autoplay, failed fetch, undecodable sample) — that behaviour
+// now lives in the shared engine.
+import {
+  createAudioEngine as createSharedAudioEngine,
+  type AudioEngine as SharedAudioEngine,
+} from '@arcade/shared/audio'
 
-// The wiring contract the pure dispatcher (shell/audio-dispatch) and its unit
-// tests speak in. DO NOT rename these without updating both — the dispatch test
-// pins them exactly.
+// The wiring contract the pure dispatcher (shell/audio-dispatch) and its unit tests
+// speak in. DO NOT rename these without updating both — the dispatch test pins them
+// exactly. This is the DISPATCHER-FACING sound set; the physical files it resolves to
+// live in SOUNDS below (the heartbeat's lub-DUB is one logical name over two files).
 export type SoundName =
   | 'fire'
   | 'explosionShip'
@@ -34,16 +38,64 @@ export type SoundName =
   | 'saucerSirenSmall' // the SMALL saucer's siren (A-13 size split) — shares the siren channel
   | 'heartbeat'
 
+// Served from the shared arcade-assets R2 host (the same custom domain tempest's
+// samples live on), NOT the repo — upload the .wav files to R2 under `asteroids/sfx/`.
+const SFX_BASE = 'https://arcade-assets.slabgorb.com/asteroids/sfx/'
+
+// asteroids' NUMBERS — the PHYSICAL sound manifest handed to the shared engine.
+// Buffers are keyed by FILENAME, so the several-names-per-file cases decode once:
+//   - the ship explosion reuses the biggest rock bang (one explosion circuit):
+//     explosionShip + explosionLarge both -> bangLarge.wav;
+//   - the heartbeat alternates two thump files (the classic lub-DUB): heartbeatLow +
+//     heartbeatHigh -> beat1/beat2.wav (the alternation is driven by the local wrapper
+//     below so the dispatcher keeps calling play('heartbeat')).
+// This REPLACES the bespoke file-keyed indirection asteroids used to carry (SH2-17
+// AC-2) — the shared filename-keyed store subsumes it, so no asteroids-specific branch
+// enters the shared code.
+const SOUNDS = {
+  fire: 'fire.wav',
+  explosionShip: 'bangLarge.wav',
+  explosionLarge: 'bangLarge.wav',
+  explosionMedium: 'bangMedium.wav',
+  explosionSmall: 'bangSmall.wav',
+  thrust: 'thrust.wav',
+  saucerSiren: 'saucerBig.wav',
+  saucerSirenSmall: 'saucerSmall.wav',
+  heartbeatLow: 'beat1.wav',
+  heartbeatHigh: 'beat2.wav',
+} as const
+
+// The physical name union the shared engine is generic over (a superset of the
+// dispatcher-facing SoundName: 'heartbeat' fans out to heartbeatLow/High).
+type SampleName = keyof typeof SOUNDS
+
+// Logical channels (POKEY-style voice stealing). Each one-shot gets its OWN channel so
+// distinct sounds never cut each other off; a rapid retrigger of the SAME sound cuts in
+// (POKEY-style) rather than stacking — the cabinet-wide convergence onto the shared
+// VERB (as tempest's 10-10). The two sirens share one channel so only one ever rings
+// (A-13); the two heartbeat thumps share one channel (they are sequential — never
+// overlap). Keyed by SampleName, so a new manifest sound without a channel is a
+// compile error.
+const CHANNELS: Record<SampleName, string> = {
+  fire: 'fire',
+  explosionShip: 'explosion-ship',
+  explosionLarge: 'explosion-large',
+  explosionMedium: 'explosion-medium',
+  explosionSmall: 'explosion-small',
+  thrust: 'thrust',
+  saucerSiren: 'saucer-siren',
+  saucerSirenSmall: 'saucer-siren',
+  heartbeatLow: 'heartbeat',
+  heartbeatHigh: 'heartbeat',
+}
+
 export interface AudioEngine {
-  // Create/resume the AudioContext and start loading samples. Safe to call
-  // repeatedly (e.g. on every user gesture); only the first call does work.
+  // Create/resume the AudioContext and start loading samples. Safe to call repeatedly;
+  // only the first call does work.
   resume(): void
-  // Play a loaded sample once. No-op if the sound is not loaded, the context is
-  // not ready, or audio is unavailable.
+  // Play a loaded sample once. Steals its channel. No-op if unloaded/unavailable.
   play(name: SoundName): void
   // Start a sustained (looping) sample on its channel (thrust, saucer siren).
-  // Steals the channel like play() does, so a retrigger cuts in instead of
-  // stacking. Same silent no-ops as play() when unavailable/unloaded.
   startLoop(name: SoundName): void
   // Stop the sustained sample on `name`'s channel. Safe no-op if nothing loops there.
   stopLoop(name: SoundName): void
@@ -51,194 +103,44 @@ export interface AudioEngine {
   ready(): boolean
 }
 
-// The decoded samples the engine holds, keyed by FILE rather than by SoundName
-// because the mapping is not 1:1:
-//   - the ship explosion reuses the biggest rock bang — the cabinet has a single
-//     explosion circuit, with no distinct ship-death sound;
-//   - the heartbeat alternates two thump samples (the classic lub-DUB).
-// `extraShip.wav` (bonus-life cue) is in the R2 sample set too but stays
-// UNWIRED here — it belongs to a future bonus-life story, not A-18's scope.
-// `saucerSmall.wav` IS wired now (A-13 integration: the small saucer's siren).
-type SampleId =
-  | 'fire'
-  | 'bangLarge'
-  | 'bangMedium'
-  | 'bangSmall'
-  | 'thrust'
-  | 'saucerBig'
-  | 'saucerSmall'
-  | 'beat1'
-  | 'beat2'
-
-const SAMPLE_FILES: Record<SampleId, string> = {
-  fire: 'fire.wav',
-  bangLarge: 'bangLarge.wav',
-  bangMedium: 'bangMedium.wav',
-  bangSmall: 'bangSmall.wav',
-  thrust: 'thrust.wav',
-  saucerBig: 'saucerBig.wav',
-  saucerSmall: 'saucerSmall.wav',
-  beat1: 'beat1.wav',
-  beat2: 'beat2.wav',
-}
-
-// Served from the shared arcade-assets R2 host (the same custom domain tempest's
-// samples live on), NOT the repo — see the file header. Upload the 10 .wav files
-// to R2 under `asteroids/sfx/` to make sound play in dev and prod alike.
-const SFX_BASE = 'https://arcade-assets.slabgorb.com/asteroids/sfx/'
-
-// Resolve the AudioContext constructor, covering the legacy `webkitAudioContext`
-// prefix and non-browser environments. Read off `globalThis` with an explicit
-// shape — `AudioContext` is a global ambient, not a `Window` member.
-function getAudioContextCtor(): typeof AudioContext | undefined {
-  const g = globalThis as {
-    AudioContext?: typeof AudioContext
-    webkitAudioContext?: typeof AudioContext
-  }
-  return g.AudioContext ?? g.webkitAudioContext
-}
+// asteroids' concrete shared engine, specialised to its physical SampleName union.
+type SampleEngine = SharedAudioEngine<SampleName>
 
 export function createAudioEngine(): AudioEngine {
-  let ctx: AudioContext | null = null
-  let master: GainNode | null = null
-  let loadStarted = false
-  const buffers = new Map<SampleId, AudioBuffer>()
-  // The looping source sounding on each channel ('thrust' | 'saucerSiren'), so
-  // stopLoop/retrigger can find and tear it down. Cleared by `onended` when a
-  // source stops, so a later trigger never stops an already-ended node.
-  const loops = new Map<string, AudioBufferSourceNode>()
-  // The heartbeat alternates lub (beat1) / DUB (beat2) on each beat.
+  const engine: SampleEngine = createSharedAudioEngine<SampleName>({
+    baseUrl: SFX_BASE,
+    masterGain: 0.5, // asteroids' long-standing headroom value (shared default is 0.4)
+    sounds: SOUNDS,
+    channels: CHANNELS,
+  })
+
+  // The heartbeat alternates lub (beat1) / DUB (beat2) on each beat. The shared engine
+  // plays one file per name, so the alternation lives HERE (not in the shared code, and
+  // not in the dispatcher — the dispatcher keeps calling play('heartbeat')).
   let beatHigh = false
 
-  // Fetch + decode every sample once. A failure on any one (network, decode) is
-  // swallowed — that sound simply never plays.
-  function load(): void {
-    if (loadStarted || !ctx) return
-    loadStarted = true
-    const context = ctx
-    for (const id of Object.keys(SAMPLE_FILES) as SampleId[]) {
-      fetch(SFX_BASE + SAMPLE_FILES[id])
-        .then((res) => res.arrayBuffer())
-        .then((data) => context.decodeAudioData(data))
-        .then((buffer) => {
-          buffers.set(id, buffer)
-        })
-        .catch(() => {
-          /* one missing/undecodable sample is non-fatal — stay silent */
-        })
-    }
-  }
-
-  function resume(): void {
-    if (!ctx) {
-      const Ctor = getAudioContextCtor()
-      if (!Ctor) return // no WebAudio — engine stays inert
-      try {
-        ctx = new Ctor()
-        master = ctx.createGain()
-        master.gain.value = 0.5 // headroom so overlapping SFX don't clip
-        master.connect(ctx.destination)
-      } catch {
-        ctx = null
-        master = null
+  return {
+    resume: () => engine.resume(),
+    ready: () => engine.ready(),
+    play(name: SoundName): void {
+      if (name === 'heartbeat') {
+        engine.play(beatHigh ? 'heartbeatHigh' : 'heartbeatLow')
+        beatHigh = !beatHigh
         return
       }
-    }
-    // The context can start 'suspended' until a gesture unlocks it.
-    if (ctx.state === 'suspended') void ctx.resume()
-    load()
-  }
-
-  // Steal a channel: stop whatever loops on it so a new trigger cuts in. Its own
-  // guard — a source that already ended would throw on stop(), and that must not
-  // abort the cut-in.
-  function stopChannel(channel: string): void {
-    const prev = loops.get(channel)
-    if (!prev) return
-    loops.delete(channel)
-    try {
-      prev.stop()
-      prev.disconnect()
-    } catch {
-      /* prior source may have already ended — ignore */
-    }
-  }
-
-  // Start a decoded sample on the master bus. A `channel` (loops only) enables
-  // stop/steal; one-shots pass none and fire-and-forget (rapid fire and stacked
-  // bangs are meant to overlap). Silent no-op if the sample hasn't decoded yet.
-  function playSample(id: SampleId, loop: boolean, channel?: string): void {
-    if (!ctx || !master) return
-    const buffer = buffers.get(id)
-    if (!buffer) return // not loaded (yet) or failed to decode — silent no-op
-    try {
-      if (channel) stopChannel(channel)
-      const source = ctx.createBufferSource()
-      source.buffer = buffer
-      source.loop = loop
-      source.connect(master)
-      if (channel) {
-        source.onended = () => {
-          if (loops.get(channel) === source) loops.delete(channel)
-        }
-        loops.set(channel, source)
+      // Every remaining SoundName is a physical SampleName 1:1.
+      engine.play(name)
+    },
+    startLoop(name: SoundName): void {
+      // Loops are only ever thrust / saucerSiren / saucerSirenSmall — all SampleNames.
+      if (name === 'thrust' || name === 'saucerSiren' || name === 'saucerSirenSmall') {
+        engine.startLoop(name)
       }
-      source.start()
-    } catch {
-      /* never let a single sound failure crash the frame */
-    }
-  }
-
-  function play(name: SoundName): void {
-    switch (name) {
-      case 'fire':
-        playSample('fire', false)
-        break
-      // The ship's death reuses the largest rock bang — one explosion circuit.
-      case 'explosionShip':
-      case 'explosionLarge':
-        playSample('bangLarge', false)
-        break
-      case 'explosionMedium':
-        playSample('bangMedium', false)
-        break
-      case 'explosionSmall':
-        playSample('bangSmall', false)
-        break
-      case 'heartbeat':
-        playSample(beatHigh ? 'beat2' : 'beat1', false)
-        beatHigh = !beatHigh
-        break
-      case 'thrust':
-      case 'saucerSiren':
-      case 'saucerSirenSmall':
-        // Sustained sounds — driven through startLoop/stopLoop, not play().
-        break
-      default: {
-        const _exhaustive: never = name
-        void _exhaustive
-        break
+    },
+    stopLoop(name: SoundName): void {
+      if (name === 'thrust' || name === 'saucerSiren' || name === 'saucerSirenSmall') {
+        engine.stopLoop(name)
       }
-    }
+    },
   }
-
-  function startLoop(name: SoundName): void {
-    // Both sirens share the 'saucerSiren' channel, so starting one (or the same
-    // saucer changing size mid-life, which never happens) steals the other —
-    // only one siren ever rings.
-    if (name === 'thrust') playSample('thrust', true, 'thrust')
-    else if (name === 'saucerSiren') playSample('saucerBig', true, 'saucerSiren')
-    else if (name === 'saucerSirenSmall') playSample('saucerSmall', true, 'saucerSiren')
-  }
-
-  function stopLoop(name: SoundName): void {
-    if (name === 'thrust') stopChannel('thrust')
-    else if (name === 'saucerSiren' || name === 'saucerSirenSmall') stopChannel('saucerSiren')
-  }
-
-  function ready(): boolean {
-    return buffers.size > 0
-  }
-
-  return { resume, play, startLoop, stopLoop, ready }
 }
