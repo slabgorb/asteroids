@@ -4,6 +4,8 @@ A faithful, browser-based clone of Atari's 1979 vector arcade game *Asteroids*.
 
 **▶ Play it live: [asteroids.slabgorb.com](https://asteroids.slabgorb.com)**
 
+![Asteroids gameplay — the vector ship among drifting rocks as a saucer crosses the field](https://arcade-assets.slabgorb.com/asteroids/screenshot.png)
+
 You pilot a ship adrift in a toroidal field of drifting rocks — rotate, thrust,
 and fire to break large rocks into smaller ones before they (or a roaming
 saucer) get you. Glowing vector lines on black, rendered with HTML5 Canvas 2D —
