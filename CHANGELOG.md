@@ -8,6 +8,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Entries describe what changed
 for the player. Purely internal work is summarised under *Internal*.
 
+## [1.0.8] - 2026-07-12
+
+No player-visible changes. Documentation only.
+
+## [1.0.7] - 2026-07-12
+
+### Added
+- **Your best score now shows on Asteroids' tile in the arcade lobby.** The game publishes
+  its top score where the lobby can read it, across subdomains (ADR-0004).
+
+## [1.0.6] - 2026-07-12
+
+No player-visible changes. Documentation only — this changelog was added.
+
 ## [1.0.5] - 2026-07-12
 
 ### Changed
