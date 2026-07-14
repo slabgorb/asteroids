@@ -8,6 +8,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Entries describe what changed
 for the player. Purely internal work is summarised under *Internal*.
 
+## [1.0.10] - 2026-07-13
+
+Version bump only.
+
+## [1.0.9] - 2026-07-13
+
+Version bump only.
+
 ## [1.0.8] - 2026-07-12
 
 No player-visible changes. Documentation only.
